@@ -4,8 +4,10 @@ mod ui;
 use data::formula::evaluate_all_formulas;
 use data::operations::{group_rows, sort_rows};
 use data::{ColumnType, Group, Sheet, SortConfig, SortDirection};
-use iced::widget::{column, container, text};
-use iced::{Element, Length, Task, Theme};
+use iced::widget::{button, column, container, horizontal_space, stack, text};
+use iced::{alignment, Element, Length, Padding, Task, Theme};
+
+const MENUBAR_HEIGHT: f32 = 30.0;
 
 fn main() -> iced::Result {
     iced::application("Table RS", TableApp::update, TableApp::view)
@@ -52,6 +54,10 @@ pub enum Message {
     GroupByColumn(usize),
     ClearGroup,
     ToggleGroup(usize),
+
+    // Menu
+    OpenMenu(String),
+    CloseMenu,
 }
 
 struct TableApp {
@@ -62,6 +68,7 @@ struct TableApp {
     show_add_col: bool,
     new_col_name: String,
     status: String,
+    open_menu: Option<String>,
 }
 
 impl TableApp {
@@ -74,6 +81,7 @@ impl TableApp {
             show_add_col: false,
             new_col_name: String::new(),
             status: "Ready".to_string(),
+            open_menu: None,
         }
     }
 
@@ -83,7 +91,14 @@ impl TableApp {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::OpenMenu(name) => {
+                self.open_menu = Some(name);
+            }
+            Message::CloseMenu => {
+                self.open_menu = None;
+            }
             Message::FileOpen => {
+                self.open_menu = None;
                 return Task::perform(
                     async {
                         let handle = rfd::AsyncFileDialog::new()
@@ -118,6 +133,7 @@ impl TableApp {
                 }
             },
             Message::FileSave => {
+                self.open_menu = None;
                 let sheet = self.sheet.clone();
                 if let Some(ref path) = sheet.file_path {
                     let path = path.clone();
@@ -292,6 +308,8 @@ impl TableApp {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        let menubar = ui::menubar::view_menubar(self.open_menu.as_deref());
+
         let toolbar = ui::toolbar::view_toolbar(
             &self.sheet,
             self.show_add_col,
@@ -306,12 +324,42 @@ impl TableApp {
         );
 
         let status_bar = container(text(&self.status).size(12))
-            .padding(iced::Padding::from([4.0, 12.0]))
+            .padding(Padding::from([4.0, 12.0]))
             .width(Length::Fill);
 
-        column![toolbar, table, status_bar]
+        let main: Element<'_, Message> = column![menubar, toolbar, table, status_bar]
             .width(Length::Fill)
             .height(Length::Fill)
-            .into()
+            .into();
+
+        if self.open_menu.as_deref() == Some("file") {
+            let dropdown = ui::menubar::view_file_dropdown();
+
+            // Full-screen transparent backdrop: clicking it closes the menu
+            let backdrop: Element<'_, Message> = button(horizontal_space())
+                .on_press(Message::CloseMenu)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(ui::menubar::transparent_btn_style)
+                .into();
+
+            // Position dropdown below the menu bar
+            let positioned: Element<'_, Message> = container(dropdown)
+                .align_x(alignment::Horizontal::Left)
+                .align_y(alignment::Vertical::Top)
+                .padding(Padding {
+                    top: MENUBAR_HEIGHT,
+                    right: 0.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into();
+
+            stack![main, stack![backdrop, positioned]].into()
+        } else {
+            main
+        }
     }
 }

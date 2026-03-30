@@ -14,21 +14,6 @@ pub fn view_toolbar<'a>(
         .padding(Padding::from([8.0, 12.0]))
         .align_y(Alignment::Center);
 
-    // File operations
-    toolbar = toolbar.push(
-        button(text("Open").size(13))
-            .on_press(Message::FileOpen)
-            .padding(Padding::from([4.0, 12.0])),
-    );
-    toolbar = toolbar.push(
-        button(text("Save").size(13))
-            .on_press(Message::FileSave)
-            .padding(Padding::from([4.0, 12.0])),
-    );
-
-    // Separator
-    toolbar = toolbar.push(text("│").size(16));
-
     // Add Row
     toolbar = toolbar.push(
         button(text("+ Row").size(13))
