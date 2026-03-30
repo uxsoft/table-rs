@@ -1,3 +1,4 @@
+mod components;
 mod data;
 mod ui;
 
@@ -469,7 +470,7 @@ impl TableApp {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let menubar = ui::menubar::view_menubar(self.open_menu.as_deref());
+        let menubar = components::menubar::view_menubar(self.open_menu.as_deref());
 
         let toolbar = ui::toolbar::view_toolbar(
             &self.sheet,
@@ -497,14 +498,14 @@ impl TableApp {
             .into();
 
         if self.open_menu.as_deref() == Some("file") {
-            let dropdown = ui::menubar::view_file_dropdown();
+            let dropdown = components::menubar::view_file_dropdown();
 
             // Full-screen transparent backdrop: clicking it closes the menu
             let backdrop: Element<'_, Message> = button(horizontal_space())
                 .on_press(Message::CloseMenu)
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .style(ui::menubar::transparent_btn_style)
+                .style(components::menubar::transparent_btn_style)
                 .into();
 
             // Position dropdown below the menu bar
@@ -523,7 +524,7 @@ impl TableApp {
 
             stack![main, stack![backdrop, positioned]].into()
         } else if let Some((row_index, pos)) = self.context_menu {
-            let ctx_menu = ui::context_menu::view_context_menu(
+            let ctx_menu = components::context_menu::view_context_menu(
                 row_index,
                 self.clipboard_row.is_some(),
             );
@@ -532,7 +533,7 @@ impl TableApp {
                 .on_press(Message::CloseContextMenu)
                 .width(Length::Fill)
                 .height(Length::Fill)
-                .style(ui::menubar::transparent_btn_style)
+                .style(components::menubar::transparent_btn_style)
                 .into();
 
             let positioned: Element<'_, Message> = container(ctx_menu)

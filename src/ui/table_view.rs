@@ -87,7 +87,7 @@ fn view_header<'a>(sheet: &'a Sheet, resizing_col: Option<usize>) -> Element<'a,
             .height(Length::Fixed(HEADER_HEIGHT))
             .style(header_button_style);
 
-        let handle_row = super::col_resize_handle::view(
+        let handle_row = crate::components::col_resize_handle::view(
             i,
             col.width,
             HEADER_HEIGHT,
