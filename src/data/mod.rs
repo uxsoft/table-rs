@@ -29,6 +29,8 @@ pub struct ColumnDef {
     pub name: String,
     pub col_type: ColumnType,
     pub width: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub formula: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -143,16 +145,19 @@ impl Sheet {
                     name: "Name".into(),
                     col_type: ColumnType::Text,
                     width: 150.0,
+                    formula: None,
                 },
                 ColumnDef {
                     name: "Value".into(),
                     col_type: ColumnType::Number,
                     width: 100.0,
+                    formula: None,
                 },
                 ColumnDef {
                     name: "Price".into(),
                     col_type: ColumnType::Currency("$".into()),
                     width: 120.0,
+                    formula: None,
                 },
             ],
             rows: vec![
@@ -198,6 +203,7 @@ impl Sheet {
             name,
             col_type,
             width,
+            formula: None,
         });
         for row in &mut self.rows {
             row.push(CellValue::Empty);

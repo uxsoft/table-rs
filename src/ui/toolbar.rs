@@ -8,7 +8,14 @@ pub fn view_toolbar<'a>(
     sheet: &'a Sheet,
     show_add_col: bool,
     new_col_name: &'a str,
+    editing_formula_col: Option<usize>,
+    editing_formula_value: &'a str,
 ) -> Element<'a, Message> {
+    // If a formula column's header was clicked, show the dedicated formula bar.
+    if let Some(col_idx) = editing_formula_col {
+        return view_formula_bar(sheet, col_idx, editing_formula_value);
+    }
+
     let mut toolbar = Row::new()
         .spacing(8)
         .padding(Padding::from([8.0, 12.0]))
@@ -128,6 +135,44 @@ pub fn view_toolbar<'a>(
     }
 
     container(toolbar)
+        .width(Length::Fill)
+        .style(toolbar_style)
+        .into()
+}
+
+fn view_formula_bar<'a>(
+    sheet: &'a Sheet,
+    col_idx: usize,
+    value: &'a str,
+) -> Element<'a, Message> {
+    let col_name = sheet
+        .columns
+        .get(col_idx)
+        .map(|c| c.name.as_str())
+        .unwrap_or("?");
+
+    let label = text(format!("fx  {}  =", col_name))
+        .size(13);
+
+    let input = text_input("e.g. {Value} * {Price}", value)
+        .on_input(move |v| Message::FormulaChanged(col_idx, v))
+        .on_submit(Message::FormulaEditCommit(col_idx))
+        .size(13)
+        .width(Length::Fill);
+
+    let commit_btn = button(text("✓").size(13))
+        .on_press(Message::FormulaEditCommit(col_idx))
+        .padding(Padding::from([4.0, 10.0]));
+
+    let row = Row::new()
+        .spacing(8)
+        .padding(Padding::from([8.0, 12.0]))
+        .align_y(Alignment::Center)
+        .push(label)
+        .push(input)
+        .push(commit_btn);
+
+    container(row)
         .width(Length::Fill)
         .style(toolbar_style)
         .into()

@@ -125,7 +125,7 @@ fn resolve_cell_references(expr: &str, sheet: &Sheet) -> String {
     result
 }
 
-/// Evaluate a single formula cell in the sheet.
+/// Evaluate a single formula cell in the sheet using absolute cell references (A1, B2…).
 pub fn evaluate_formula(sheet: &Sheet, expr: &str) -> Result<f64, String> {
     // First expand range functions
     let expanded = expand_range_functions(expr, sheet);
@@ -140,16 +140,92 @@ pub fn evaluate_formula(sheet: &Sheet, expr: &str) -> Result<f64, String> {
     }
 }
 
+/// Evaluate a column-level formula (Airtable-style) for a specific row.
+///
+/// The formula uses `{ColumnName}` placeholders that are resolved to the
+/// numeric value of that column in the given row. Example: `{Value} * {Price}`.
+pub fn evaluate_column_formula(sheet: &Sheet, expr: &str, row_idx: usize) -> Result<f64, String> {
+    if row_idx >= sheet.rows.len() {
+        return Err("Row out of bounds".to_string());
+    }
+
+    // Replace every {ColumnName} with the row's value for that column.
+    // We do this by scanning for all {…} tokens.
+    let placeholder_re = Regex::new(r"\{([^}]+)\}").unwrap();
+    let row = &sheet.rows[row_idx];
+
+    let mut resolved = String::new();
+    let mut last_end = 0;
+
+    for caps in placeholder_re.captures_iter(expr) {
+        let full = caps.get(0).unwrap();
+        let col_name = &caps[1];
+
+        resolved.push_str(&expr[last_end..full.start()]);
+
+        let value = sheet
+            .columns
+            .iter()
+            .position(|c| c.name == col_name)
+            .and_then(|ci| row.get(ci))
+            .and_then(|cell| cell.as_f64())
+            .unwrap_or(0.0);
+
+        resolved.push_str(&format!("{}", value));
+        last_end = full.end();
+    }
+    resolved.push_str(&expr[last_end..]);
+
+    match eval(&resolved) {
+        Ok(Value::Float(f)) => Ok(f),
+        Ok(Value::Int(i)) => Ok(i as f64),
+        Ok(other) => Err(format!("Expected number, got: {:?}", other)),
+        Err(e) => Err(format!("Formula error: {}", e)),
+    }
+}
+
 /// Re-evaluate all formula cells in the sheet.
-/// Simple approach: iterate multiple passes until values stabilize (handles dependencies).
+///
+/// - Columns with `ColumnType::Formula` and a `column.formula` expression use
+///   the column-level Airtable-style evaluation (`{ColumnName}` placeholders).
+/// - Individual `CellValue::Formula` cells (legacy per-cell mode) are still
+///   evaluated using absolute cell references for backward compatibility.
 pub fn evaluate_all_formulas(sheet: &mut Sheet) {
+    // Pass 1: column-level formulas — overwrite every cell in the column.
+    for col_idx in 0..sheet.columns.len() {
+        if sheet.columns[col_idx].col_type != super::ColumnType::Formula {
+            continue;
+        }
+        let Some(expr) = sheet.columns[col_idx].formula.clone() else {
+            continue;
+        };
+        for row_idx in 0..sheet.rows.len() {
+            let result = evaluate_column_formula(sheet, &expr, row_idx).ok();
+            sheet.rows[row_idx][col_idx] = CellValue::Formula {
+                expr: String::new(), // expression lives on the column, not the cell
+                cached: result,
+            };
+        }
+    }
+
+    // Pass 2: legacy per-cell formulas (non-formula-typed columns, or cells
+    // that had an expression stored before the column-level feature existed).
     let max_passes = 10;
     for _ in 0..max_passes {
         let mut changed = false;
         for r in 0..sheet.rows.len() {
             for c in 0..sheet.rows[r].len() {
+                // Skip columns that are governed by a column-level formula.
+                if sheet.columns[c].col_type == super::ColumnType::Formula
+                    && sheet.columns[c].formula.is_some()
+                {
+                    continue;
+                }
                 if let CellValue::Formula { ref expr, cached } = sheet.rows[r][c].clone() {
-                    let new_val = evaluate_formula(sheet, &expr).ok();
+                    if expr.is_empty() {
+                        continue;
+                    }
+                    let new_val = evaluate_formula(sheet, expr).ok();
                     if new_val != cached {
                         sheet.rows[r][c] = CellValue::Formula {
                             expr: expr.clone(),
@@ -165,3 +241,4 @@ pub fn evaluate_all_formulas(sheet: &mut Sheet) {
         }
     }
 }
+

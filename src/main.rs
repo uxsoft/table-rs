@@ -53,6 +53,10 @@ pub enum Message {
     NewColNameChanged(String),
     AddColumn(ColumnType),
 
+    // Column formula
+    FormulaChanged(usize, String),
+    FormulaEditCommit(usize),
+
     // Sort
     SortColumn(usize),
     ToggleSortDirection,
@@ -91,6 +95,9 @@ struct TableApp {
     context_menu: Option<(usize, Point)>,
     clipboard_row: Option<Vec<data::CellValue>>,
     cursor_pos: Point,
+    /// Column index whose formula is currently being edited in the toolbar
+    editing_formula_col: Option<usize>,
+    editing_formula_value: String,
 }
 
 impl TableApp {
@@ -107,6 +114,8 @@ impl TableApp {
             context_menu: None,
             clipboard_row: None,
             cursor_pos: Point::ORIGIN,
+            editing_formula_col: None,
+            editing_formula_value: String::new(),
         }
     }
 
@@ -248,6 +257,10 @@ impl TableApp {
                 }
             },
             Message::CellClicked(row, col) => {
+                // Formula columns are read-only — clicking does nothing.
+                if matches!(self.sheet.columns.get(col), Some(c) if c.formula.is_some()) {
+                    return Task::none();
+                }
                 // Commit previous edit if any
                 self.commit_edit();
                 self.editing = Some((row, col));
@@ -264,6 +277,16 @@ impl TableApp {
                 self.edit_value.clear();
             }
             Message::HeaderClicked(col) => {
+                // If this is a formula column, open formula editor instead of sorting.
+                if matches!(self.sheet.columns.get(col), Some(c) if c.col_type == ColumnType::Formula) {
+                    let current = self.sheet.columns[col]
+                        .formula
+                        .clone()
+                        .unwrap_or_default();
+                    self.editing_formula_col = Some(col);
+                    self.editing_formula_value = current;
+                    return Task::none();
+                }
                 // Toggle sort on this column
                 match &self.sheet.sort {
                     Some(s) if s.column == col => {
@@ -320,10 +343,34 @@ impl TableApp {
                 } else {
                     self.new_col_name.trim().to_string()
                 };
+                let is_formula = col_type == ColumnType::Formula;
                 self.sheet.add_column(name, col_type);
                 self.show_add_col = false;
                 self.new_col_name.clear();
+                // Immediately open the formula editor for new formula columns.
+                if is_formula {
+                    let new_col = self.sheet.columns.len() - 1;
+                    self.editing_formula_col = Some(new_col);
+                    self.editing_formula_value = String::new();
+                }
                 self.recompute_groups();
+            }
+            Message::FormulaChanged(_col, value) => {
+                self.editing_formula_value = value;
+            }
+            Message::FormulaEditCommit(col) => {
+                let expr = self.editing_formula_value.trim().to_string();
+                if col < self.sheet.columns.len() {
+                    self.sheet.columns[col].formula = if expr.is_empty() {
+                        None
+                    } else {
+                        Some(expr)
+                    };
+                    evaluate_all_formulas(&mut self.sheet);
+                    self.recompute_groups();
+                }
+                self.editing_formula_col = None;
+                self.editing_formula_value.clear();
             }
             Message::SortColumn(col) => {
                 self.sheet.sort = Some(SortConfig {
@@ -396,6 +443,8 @@ impl TableApp {
             &self.sheet,
             self.show_add_col,
             &self.new_col_name,
+            self.editing_formula_col,
+            &self.editing_formula_value,
         );
 
         let table = ui::table_view::view_table(

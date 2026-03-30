@@ -65,7 +65,16 @@ fn view_header<'a>(sheet: &'a Sheet) -> Element<'a, Message> {
             ColumnType::Formula => "fx",
         };
 
-        let label = format!("{} {}{}", type_badge, col.name, sort_indicator);
+        // For formula columns, show the expression in the header (like Airtable).
+        let label = if col.col_type == ColumnType::Formula {
+            if let Some(ref expr) = col.formula {
+                format!("fx {} = {}{}", col.name, expr, sort_indicator)
+            } else {
+                format!("fx {} (click to set formula){}", col.name, sort_indicator)
+            }
+        } else {
+            format!("{} {}{}", type_badge, col.name, sort_indicator)
+        };
 
         let header_cell = button(text(label).size(13))
             .on_press(Message::HeaderClicked(i))
@@ -181,16 +190,28 @@ fn view_data_row<'a>(
                 let display = cell.display_value(currency_sym);
                 let txt = text(display).size(13);
 
-                let cell_container = button(txt)
-                    .on_press(Message::CellClicked(row_index, c))
-                    .padding(cell_padding())
-                    .width(width)
-                    .height(ROW_HEIGHT)
-                    .style(if alternate {
-                        data_cell_alt_style
-                    } else {
-                        data_cell_style
-                    });
+                // Formula columns are read-only: no on_press handler.
+                let is_formula_col = col_def.col_type == ColumnType::Formula
+                    && col_def.formula.is_some();
+
+                let cell_container = if is_formula_col {
+                    button(txt)
+                        .padding(cell_padding())
+                        .width(width)
+                        .height(ROW_HEIGHT)
+                        .style(formula_cell_style)
+                } else {
+                    button(txt)
+                        .on_press(Message::CellClicked(row_index, c))
+                        .padding(cell_padding())
+                        .width(width)
+                        .height(ROW_HEIGHT)
+                        .style(if alternate {
+                            data_cell_alt_style
+                        } else {
+                            data_cell_style
+                        })
+                };
 
                 cell_container.into()
             };
@@ -258,6 +279,29 @@ fn data_cell_style(theme: &iced::Theme, status: button::Status) -> button::Style
     };
     button::Style {
         background: Some(bg.into()),
+        text_color: palette.background.base.text,
+        border: iced::Border {
+            color: palette.background.weak.color,
+            width: 0.5,
+            radius: 0.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+fn formula_cell_style(theme: &iced::Theme, _status: button::Status) -> button::Style {
+    let palette = theme.extended_palette();
+    // Slightly tinted background to indicate read-only computed value.
+    button::Style {
+        background: Some(
+            iced::Color {
+                r: palette.primary.weak.color.r,
+                g: palette.primary.weak.color.g,
+                b: palette.primary.weak.color.b,
+                a: 0.12,
+            }
+            .into(),
+        ),
         text_color: palette.background.base.text,
         border: iced::Border {
             color: palette.background.weak.color,

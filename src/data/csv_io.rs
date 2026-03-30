@@ -36,6 +36,7 @@ pub fn load(path: &Path) -> Result<Sheet, Box<dyn std::error::Error>> {
                 name: headers[cols.len()].clone(),
                 col_type: ColumnType::Text,
                 width: 150.0,
+                formula: None,
             });
         }
         cols.truncate(headers.len());
@@ -47,6 +48,7 @@ pub fn load(path: &Path) -> Result<Sheet, Box<dyn std::error::Error>> {
                 name: h.clone(),
                 col_type: ColumnType::Text,
                 width: 150.0,
+                formula: None,
             })
             .collect()
     };
