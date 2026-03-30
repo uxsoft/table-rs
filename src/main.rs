@@ -1,0 +1,317 @@
+mod data;
+mod ui;
+
+use data::formula::evaluate_all_formulas;
+use data::operations::{group_rows, sort_rows};
+use data::{ColumnType, Group, Sheet, SortConfig, SortDirection};
+use iced::widget::{column, container, text};
+use iced::{Element, Length, Task, Theme};
+
+fn main() -> iced::Result {
+    iced::application("Table RS", TableApp::update, TableApp::view)
+        .theme(|_| Theme::TokyoNight)
+        .window_size((1200.0, 700.0))
+        .run_with(|| {
+            let mut app = TableApp::new();
+            evaluate_all_formulas(&mut app.sheet);
+            app.recompute_groups();
+            (app, Task::none())
+        })
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    // File ops
+    FileOpen,
+    FileLoaded(Result<Sheet, String>),
+    FileSave,
+    FileSaved(Result<(), String>),
+
+    // Cell editing
+    CellClicked(usize, usize),
+    CellEdited(usize, usize, String),
+    CellEditCommit,
+    CellEditCancel,
+
+    // Column header
+    HeaderClicked(usize),
+    ColumnTypeChanged(usize, ColumnType),
+
+    // Rows & columns
+    AddRow,
+    ToggleAddColumn,
+    NewColNameChanged(String),
+    AddColumn(ColumnType),
+
+    // Sort
+    SortColumn(usize),
+    ToggleSortDirection,
+    ClearSort,
+
+    // Group
+    GroupByColumn(usize),
+    ClearGroup,
+    ToggleGroup(usize),
+}
+
+struct TableApp {
+    sheet: Sheet,
+    editing: Option<(usize, usize)>,
+    edit_value: String,
+    groups: Option<Vec<Group>>,
+    show_add_col: bool,
+    new_col_name: String,
+    status: String,
+}
+
+impl TableApp {
+    fn new() -> Self {
+        TableApp {
+            sheet: Sheet::new_empty(),
+            editing: None,
+            edit_value: String::new(),
+            groups: None,
+            show_add_col: false,
+            new_col_name: String::new(),
+            status: "Ready".to_string(),
+        }
+    }
+
+    fn recompute_groups(&mut self) {
+        self.groups = group_rows(&self.sheet);
+    }
+
+    fn update(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::FileOpen => {
+                return Task::perform(
+                    async {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .add_filter("CSV", &["csv"])
+                            .pick_file()
+                            .await;
+
+                        match handle {
+                            Some(h) => {
+                                let path = h.path().to_path_buf();
+                                data::csv_io::load(&path)
+                                    .map_err(|e| e.to_string())
+                            }
+                            None => Err("Cancelled".to_string()),
+                        }
+                    },
+                    Message::FileLoaded,
+                );
+            }
+            Message::FileLoaded(result) => match result {
+                Ok(mut sheet) => {
+                    evaluate_all_formulas(&mut sheet);
+                    self.sheet = sheet;
+                    self.editing = None;
+                    self.recompute_groups();
+                    sort_rows(&mut self.sheet);
+                    self.status = "File loaded".to_string();
+                }
+                Err(e) if e == "Cancelled" => {}
+                Err(e) => {
+                    self.status = format!("Error: {}", e);
+                }
+            },
+            Message::FileSave => {
+                let sheet = self.sheet.clone();
+                if let Some(ref path) = sheet.file_path {
+                    let path = path.clone();
+                    return Task::perform(
+                        async move {
+                            data::csv_io::save(&sheet, &path)
+                                .map_err(|e| e.to_string())
+                        },
+                        Message::FileSaved,
+                    );
+                } else {
+                    // Save As
+                    return Task::perform(
+                        async move {
+                            let handle = rfd::AsyncFileDialog::new()
+                                .add_filter("CSV", &["csv"])
+                                .save_file()
+                                .await;
+
+                            match handle {
+                                Some(h) => {
+                                    let path = h.path().to_path_buf();
+                                    data::csv_io::save(&sheet, &path)
+                                        .map_err(|e| e.to_string())
+                                }
+                                None => Err("Cancelled".to_string()),
+                            }
+                        },
+                        Message::FileSaved,
+                    );
+                }
+            }
+            Message::FileSaved(result) => match result {
+                Ok(()) => {
+                    self.status = "File saved".to_string();
+                }
+                Err(e) if e == "Cancelled" => {}
+                Err(e) => {
+                    self.status = format!("Save error: {}", e);
+                }
+            },
+            Message::CellClicked(row, col) => {
+                // Commit previous edit if any
+                self.commit_edit();
+                self.editing = Some((row, col));
+                self.edit_value = self.sheet.rows[row][col].edit_value();
+            }
+            Message::CellEdited(_row, _col, value) => {
+                self.edit_value = value;
+            }
+            Message::CellEditCommit => {
+                self.commit_edit();
+            }
+            Message::CellEditCancel => {
+                self.editing = None;
+                self.edit_value.clear();
+            }
+            Message::HeaderClicked(col) => {
+                // Toggle sort on this column
+                match &self.sheet.sort {
+                    Some(s) if s.column == col => {
+                        match s.direction {
+                            SortDirection::Ascending => {
+                                self.sheet.sort = Some(SortConfig {
+                                    column: col,
+                                    direction: SortDirection::Descending,
+                                });
+                            }
+                            SortDirection::Descending => {
+                                self.sheet.sort = None;
+                            }
+                        }
+                    }
+                    _ => {
+                        self.sheet.sort = Some(SortConfig {
+                            column: col,
+                            direction: SortDirection::Ascending,
+                        });
+                    }
+                }
+                sort_rows(&mut self.sheet);
+                self.recompute_groups();
+            }
+            Message::ColumnTypeChanged(col, new_type) => {
+                if col < self.sheet.columns.len() {
+                    self.sheet.columns[col].col_type = new_type.clone();
+                    // Re-parse all cells in this column
+                    for row in &mut self.sheet.rows {
+                        if let Some(cell) = row.get(col) {
+                            let raw = cell.edit_value();
+                            row[col] = data::parse_cell_value(&raw, &new_type);
+                        }
+                    }
+                    evaluate_all_formulas(&mut self.sheet);
+                    self.recompute_groups();
+                }
+            }
+            Message::AddRow => {
+                self.sheet.add_row();
+                self.recompute_groups();
+            }
+            Message::ToggleAddColumn => {
+                self.show_add_col = !self.show_add_col;
+                self.new_col_name.clear();
+            }
+            Message::NewColNameChanged(name) => {
+                self.new_col_name = name;
+            }
+            Message::AddColumn(col_type) => {
+                let name = if self.new_col_name.trim().is_empty() {
+                    format!("Column {}", self.sheet.col_count() + 1)
+                } else {
+                    self.new_col_name.trim().to_string()
+                };
+                self.sheet.add_column(name, col_type);
+                self.show_add_col = false;
+                self.new_col_name.clear();
+                self.recompute_groups();
+            }
+            Message::SortColumn(col) => {
+                self.sheet.sort = Some(SortConfig {
+                    column: col,
+                    direction: SortDirection::Ascending,
+                });
+                sort_rows(&mut self.sheet);
+                self.recompute_groups();
+            }
+            Message::ToggleSortDirection => {
+                if let Some(ref mut s) = self.sheet.sort {
+                    s.direction = match s.direction {
+                        SortDirection::Ascending => SortDirection::Descending,
+                        SortDirection::Descending => SortDirection::Ascending,
+                    };
+                }
+                sort_rows(&mut self.sheet);
+                self.recompute_groups();
+            }
+            Message::ClearSort => {
+                self.sheet.sort = None;
+                self.recompute_groups();
+            }
+            Message::GroupByColumn(col) => {
+                self.sheet.group_by = Some(col);
+                self.recompute_groups();
+            }
+            Message::ClearGroup => {
+                self.sheet.group_by = None;
+                self.groups = None;
+            }
+            Message::ToggleGroup(gi) => {
+                if let Some(ref mut groups) = self.groups {
+                    if let Some(g) = groups.get_mut(gi) {
+                        g.collapsed = !g.collapsed;
+                    }
+                }
+            }
+        }
+        Task::none()
+    }
+
+    fn commit_edit(&mut self) {
+        if let Some((row, col)) = self.editing.take() {
+            let value = self.edit_value.clone();
+            self.sheet.set_cell(row, col, value);
+            evaluate_all_formulas(&mut self.sheet);
+            if self.sheet.sort.is_some() {
+                sort_rows(&mut self.sheet);
+            }
+            self.recompute_groups();
+            self.edit_value.clear();
+        }
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        let toolbar = ui::toolbar::view_toolbar(
+            &self.sheet,
+            self.show_add_col,
+            &self.new_col_name,
+        );
+
+        let table = ui::table_view::view_table(
+            &self.sheet,
+            self.editing,
+            &self.edit_value,
+            &self.groups,
+        );
+
+        let status_bar = container(text(&self.status).size(12))
+            .padding(iced::Padding::from([4.0, 12.0]))
+            .width(Length::Fill);
+
+        column![toolbar, table, status_bar]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+}
