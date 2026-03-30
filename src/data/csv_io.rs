@@ -3,11 +3,7 @@ use std::path::{Path, PathBuf};
 use super::{CellValue, ColumnDef, ColumnType, Sheet, SheetMeta, parse_cell_value};
 
 fn meta_path(csv_path: &Path) -> PathBuf {
-    let stem = csv_path
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy();
-    csv_path.with_file_name(format!("{}.table-rs.json", stem))
+    csv_path.with_extension("json")
 }
 
 pub fn load(path: &Path) -> Result<Sheet, Box<dyn std::error::Error>> {
