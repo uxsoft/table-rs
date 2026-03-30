@@ -14,13 +14,6 @@ pub fn view_toolbar<'a>(
         .padding(Padding::from([8.0, 12.0]))
         .align_y(Alignment::Center);
 
-    // Add Row
-    toolbar = toolbar.push(
-        button(text("+ Row").size(13))
-            .on_press(Message::AddRow)
-            .padding(Padding::from([4.0, 12.0])),
-    );
-
     // Add Column
     if show_add_col {
         toolbar = toolbar.push(

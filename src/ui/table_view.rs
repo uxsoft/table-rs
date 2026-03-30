@@ -91,6 +91,7 @@ fn view_flat_body<'a>(
     for r in 0..sheet.rows.len() {
         col = col.push(view_data_row(sheet, r, editing, edit_value, r % 2 == 1));
     }
+    col = col.push(view_add_row(sheet));
     col.width(Length::Fill).into()
 }
 
@@ -128,6 +129,7 @@ fn view_grouped_body<'a>(
             }
         }
     }
+    col = col.push(view_add_row(sheet));
 
     col.width(Length::Fill).into()
 }
@@ -196,6 +198,23 @@ fn view_data_row<'a>(
     container(data_row)
         .width(Length::Fill)
         .into()
+}
+
+fn view_add_row<'a>(sheet: &'a Sheet) -> Element<'a, Message> {
+    let total_width: f32 =
+        ROW_NUMBER_WIDTH + sheet.columns.iter().map(|c| c.width).sum::<f32>();
+
+    let add_btn = button(
+        container(text("+ Add row").size(12))
+            .width(Length::Fixed(total_width))
+            .padding(cell_padding()),
+    )
+    .on_press(Message::AddRow)
+    .height(Length::Fixed(ROW_HEIGHT))
+    .width(Length::Fixed(total_width))
+    .style(add_row_style);
+
+    container(add_btn).width(Length::Fill).into()
 }
 
 // -- Styles --
@@ -282,6 +301,24 @@ fn row_number_style(theme: &iced::Theme) -> container::Style {
     let palette = theme.extended_palette();
     container::Style {
         background: Some(palette.background.weak.color.into()),
+        ..Default::default()
+    }
+}
+
+fn add_row_style(theme: &iced::Theme, status: button::Status) -> button::Style {
+    let palette = theme.extended_palette();
+    let bg = match status {
+        button::Status::Hovered => palette.background.weak.color,
+        _ => palette.background.base.color,
+    };
+    button::Style {
+        background: Some(bg.into()),
+        text_color: palette.background.base.text.scale_alpha(0.5),
+        border: iced::Border {
+            color: palette.background.weak.color,
+            width: 0.5,
+            radius: 0.0.into(),
+        },
         ..Default::default()
     }
 }
