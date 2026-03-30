@@ -1,4 +1,7 @@
-use iced::widget::{button, container, mouse_area, row, text, text_input, Column, Row, Scrollable};
+use iced::widget::{
+    button, container, mouse_area, row, stack, text, text_input, Column, Row,
+    Scrollable,
+};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::data::{ColumnType, Group, Sheet};
@@ -17,8 +20,9 @@ pub fn view_table<'a>(
     editing: Option<(usize, usize)>,
     edit_value: &'a str,
     groups: &'a Option<Vec<Group>>,
+    resizing_col: Option<usize>,
 ) -> Element<'a, Message> {
-    let header = view_header(sheet);
+    let header = view_header(sheet, resizing_col);
 
     let body: Element<'a, Message> = if let Some(groups) = groups {
         view_grouped_body(sheet, groups, editing, edit_value)
@@ -36,7 +40,7 @@ pub fn view_table<'a>(
         .into()
 }
 
-fn view_header<'a>(sheet: &'a Sheet) -> Element<'a, Message> {
+fn view_header<'a>(sheet: &'a Sheet, resizing_col: Option<usize>) -> Element<'a, Message> {
     let mut header_row = Row::new()
         .height(Length::Fixed(HEADER_HEIGHT))
         .align_y(Alignment::Center);
@@ -76,13 +80,28 @@ fn view_header<'a>(sheet: &'a Sheet) -> Element<'a, Message> {
             format!("{} {}{}", type_badge, col.name, sort_indicator)
         };
 
-        let header_cell = button(text(label).size(13))
+        let header_btn = button(text(label).size(13))
             .on_press(Message::HeaderClicked(i))
             .padding(cell_padding())
             .width(Length::Fixed(col.width))
+            .height(Length::Fixed(HEADER_HEIGHT))
             .style(header_button_style);
 
-        header_row = header_row.push(header_cell);
+        let handle_row = super::col_resize_handle::view(
+            i,
+            col.width,
+            HEADER_HEIGHT,
+            resizing_col == Some(i),
+        );
+
+        let cell = stack![
+            header_btn,
+            handle_row,
+        ]
+        .width(Length::Fixed(col.width))
+        .height(Length::Fixed(HEADER_HEIGHT));
+
+        header_row = header_row.push(cell);
     }
 
     container(header_row)

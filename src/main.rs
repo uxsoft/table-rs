@@ -79,6 +79,10 @@ pub enum Message {
     DeleteRow(usize),
     CloseContextMenu,
 
+    // Column resizing
+    ColResizeStart(usize),
+    ColResizeEnd,
+
     // Cursor tracking (for context menu positioning)
     CursorMoved(Point),
 }
@@ -98,6 +102,9 @@ struct TableApp {
     /// Column index whose formula is currently being edited in the toolbar
     editing_formula_col: Option<usize>,
     editing_formula_value: String,
+    resizing_col: Option<usize>,
+    resize_start_x: f32,
+    resize_start_width: f32,
 }
 
 impl TableApp {
@@ -116,6 +123,9 @@ impl TableApp {
             cursor_pos: Point::ORIGIN,
             editing_formula_col: None,
             editing_formula_value: String::new(),
+            resizing_col: None,
+            resize_start_x: 0.0,
+            resize_start_width: 0.0,
         }
     }
 
@@ -126,7 +136,25 @@ impl TableApp {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::CursorMoved(pos) => {
+                // Drive column resize if active.
+                if let Some(col) = self.resizing_col {
+                    let delta = pos.x - self.resize_start_x;
+                    let new_width = (self.resize_start_width + delta).max(40.0);
+                    if col < self.sheet.columns.len() {
+                        self.sheet.columns[col].width = new_width;
+                    }
+                }
                 self.cursor_pos = pos;
+            }
+            Message::ColResizeStart(col) => {
+                if col < self.sheet.columns.len() {
+                    self.resizing_col = Some(col);
+                    self.resize_start_x = self.cursor_pos.x;
+                    self.resize_start_width = self.sheet.columns[col].width;
+                }
+            }
+            Message::ColResizeEnd => {
+                self.resizing_col = None;
             }
             Message::RowRightClicked(row) => {
                 self.context_menu = Some((row, self.cursor_pos));
@@ -428,10 +456,14 @@ impl TableApp {
 
     fn subscription(&self) -> iced::Subscription<Message> {
         iced::event::listen_with(|event, _status, _id| {
-            if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
-                Some(Message::CursorMoved(position))
-            } else {
-                None
+            match event {
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                    Some(Message::CursorMoved(position))
+                }
+                iced::Event::Mouse(
+                    iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left),
+                ) => Some(Message::ColResizeEnd),
+                _ => None,
             }
         })
     }
@@ -452,6 +484,7 @@ impl TableApp {
             self.editing,
             &self.edit_value,
             &self.groups,
+            self.resizing_col,
         );
 
         let status_bar = container(text(&self.status).size(12))
