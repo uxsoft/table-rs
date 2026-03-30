@@ -1,4 +1,4 @@
-use iced::widget::{button, container, row, text, text_input, Column, Row, Scrollable};
+use iced::widget::{button, container, mouse_area, row, text, text_input, Column, Row, Scrollable};
 use iced::{Alignment, Element, Length, Padding};
 
 use crate::data::{ColumnType, Group, Sheet};
@@ -146,13 +146,16 @@ fn view_data_row<'a>(
         .height(Length::Fixed(ROW_HEIGHT))
         .align_y(Alignment::Center);
 
-    // Row number
+    // Row number — right-click opens context menu
+    let row_num_cell = container(text(format!("{}", row_index)).size(11))
+        .width(Length::Fixed(ROW_NUMBER_WIDTH))
+        .height(ROW_HEIGHT)
+        .padding(cell_padding())
+        .style(row_number_style);
+
     data_row = data_row.push(
-        container(text(format!("{}", row_index)).size(11))
-            .width(Length::Fixed(ROW_NUMBER_WIDTH))
-            .height(ROW_HEIGHT)
-            .padding(cell_padding())
-            .style(row_number_style),
+        mouse_area(row_num_cell)
+            .on_right_press(Message::RowRightClicked(row_index)),
     );
 
     for (c, cell) in row_data.iter().enumerate() {

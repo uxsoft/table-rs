@@ -220,6 +220,17 @@ impl Sheet {
     pub fn row_count(&self) -> usize {
         self.rows.len()
     }
+
+    pub fn delete_row(&mut self, index: usize) {
+        if index < self.rows.len() {
+            self.rows.remove(index);
+        }
+    }
+
+    pub fn insert_row_after(&mut self, index: usize, row: Vec<CellValue>) {
+        let insert_at = (index + 1).min(self.rows.len());
+        self.rows.insert(insert_at, row);
+    }
 }
 
 pub fn parse_cell_value(input: &str, col_type: &ColumnType) -> CellValue {

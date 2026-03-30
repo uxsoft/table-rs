@@ -5,6 +5,7 @@ use data::formula::evaluate_all_formulas;
 use data::operations::{group_rows, sort_rows};
 use data::{ColumnType, Group, Sheet, SortConfig, SortDirection};
 use iced::widget::{button, column, container, horizontal_space, stack, text};
+use iced::Point;
 use iced::{alignment, Element, Font, Length, Padding, Task, Theme};
 
 const MENUBAR_HEIGHT: f32 = 30.0;
@@ -14,6 +15,7 @@ const SYMBOLS_NERD_FONT: &[u8] =
 
 fn main() -> iced::Result {
     iced::application("Table RS", TableApp::update, TableApp::view)
+        .subscription(TableApp::subscription)
         .font(INTER_FONT)
         .font(SYMBOLS_NERD_FONT)
         .default_font(Font::with_name("Inter"))
@@ -64,6 +66,17 @@ pub enum Message {
     // Menu
     OpenMenu(String),
     CloseMenu,
+
+    // Context menu
+    RowRightClicked(usize),
+    CutRow(usize),
+    CopyRow(usize),
+    PasteRow(usize),
+    DeleteRow(usize),
+    CloseContextMenu,
+
+    // Cursor tracking (for context menu positioning)
+    CursorMoved(Point),
 }
 
 struct TableApp {
@@ -75,6 +88,9 @@ struct TableApp {
     new_col_name: String,
     status: String,
     open_menu: Option<String>,
+    context_menu: Option<(usize, Point)>,
+    clipboard_row: Option<Vec<data::CellValue>>,
+    cursor_pos: Point,
 }
 
 impl TableApp {
@@ -88,6 +104,9 @@ impl TableApp {
             new_col_name: String::new(),
             status: "Ready".to_string(),
             open_menu: None,
+            context_menu: None,
+            clipboard_row: None,
+            cursor_pos: Point::ORIGIN,
         }
     }
 
@@ -97,8 +116,55 @@ impl TableApp {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::CursorMoved(pos) => {
+                self.cursor_pos = pos;
+            }
+            Message::RowRightClicked(row) => {
+                self.context_menu = Some((row, self.cursor_pos));
+                self.open_menu = None;
+            }
+            Message::CloseContextMenu => {
+                self.context_menu = None;
+            }
+            Message::CopyRow(row) => {
+                if row < self.sheet.rows.len() {
+                    self.clipboard_row = Some(self.sheet.rows[row].clone());
+                }
+                self.context_menu = None;
+            }
+            Message::CutRow(row) => {
+                if row < self.sheet.rows.len() {
+                    self.clipboard_row = Some(self.sheet.rows[row].clone());
+                    self.sheet.delete_row(row);
+                    if let Some((erow, _)) = self.editing {
+                        if erow >= self.sheet.rows.len() {
+                            self.editing = None;
+                        }
+                    }
+                    self.recompute_groups();
+                }
+                self.context_menu = None;
+            }
+            Message::PasteRow(row) => {
+                if let Some(clipboard) = self.clipboard_row.clone() {
+                    self.sheet.insert_row_after(row, clipboard);
+                    self.recompute_groups();
+                }
+                self.context_menu = None;
+            }
+            Message::DeleteRow(row) => {
+                self.sheet.delete_row(row);
+                if let Some((erow, _)) = self.editing {
+                    if erow >= self.sheet.rows.len() {
+                        self.editing = None;
+                    }
+                }
+                self.recompute_groups();
+                self.context_menu = None;
+            }
             Message::OpenMenu(name) => {
                 self.open_menu = Some(name);
+                self.context_menu = None;
             }
             Message::CloseMenu => {
                 self.open_menu = None;
@@ -313,6 +379,16 @@ impl TableApp {
         }
     }
 
+    fn subscription(&self) -> iced::Subscription<Message> {
+        iced::event::listen_with(|event, _status, _id| {
+            if let iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) = event {
+                Some(Message::CursorMoved(position))
+            } else {
+                None
+            }
+        })
+    }
+
     fn view(&self) -> Element<'_, Message> {
         let menubar = ui::menubar::view_menubar(self.open_menu.as_deref());
 
@@ -358,6 +434,33 @@ impl TableApp {
                     right: 0.0,
                     bottom: 0.0,
                     left: 0.0,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into();
+
+            stack![main, stack![backdrop, positioned]].into()
+        } else if let Some((row_index, pos)) = self.context_menu {
+            let ctx_menu = ui::context_menu::view_context_menu(
+                row_index,
+                self.clipboard_row.is_some(),
+            );
+
+            let backdrop: Element<'_, Message> = button(horizontal_space())
+                .on_press(Message::CloseContextMenu)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(ui::menubar::transparent_btn_style)
+                .into();
+
+            let positioned: Element<'_, Message> = container(ctx_menu)
+                .align_x(alignment::Horizontal::Left)
+                .align_y(alignment::Vertical::Top)
+                .padding(Padding {
+                    top: pos.y,
+                    left: pos.x,
+                    right: 0.0,
+                    bottom: 0.0,
                 })
                 .width(Length::Fill)
                 .height(Length::Fill)
