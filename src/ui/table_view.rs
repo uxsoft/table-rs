@@ -4,9 +4,9 @@ use iced::{Alignment, Element, Length, Padding};
 use crate::data::{ColumnType, Group, Sheet};
 use crate::Message;
 
-const ROW_HEIGHT: f32 = 36.0;
+const ROW_HEIGHT: f32 = 32.0;
 const HEADER_HEIGHT: f32 = 40.0;
-const ROW_NUMBER_WIDTH: f32 = 50.0;
+const ROW_NUMBER_WIDTH: f32 = 32.0;
 
 fn cell_padding() -> Padding {
     Padding::from([4.0, 8.0])
@@ -87,7 +87,7 @@ fn view_flat_body<'a>(
     editing: Option<(usize, usize)>,
     edit_value: &'a str,
 ) -> Element<'a, Message> {
-    let mut col = Column::new();
+    let mut col = Column::new().spacing(0);
     for r in 0..sheet.rows.len() {
         col = col.push(view_data_row(sheet, r, editing, edit_value, r % 2 == 1));
     }
@@ -100,7 +100,7 @@ fn view_grouped_body<'a>(
     editing: Option<(usize, usize)>,
     edit_value: &'a str,
 ) -> Element<'a, Message> {
-    let mut col = Column::new();
+    let mut col = Column::new().spacing(0);
 
     for (gi, group) in groups.iter().enumerate() {
         // Group header
@@ -146,8 +146,9 @@ fn view_data_row<'a>(
 
     // Row number
     data_row = data_row.push(
-        container(text(format!("{}", row_index + 1)).size(11))
+        container(text(format!("{}", row_index)).size(11))
             .width(Length::Fixed(ROW_NUMBER_WIDTH))
+            .height(ROW_HEIGHT)
             .padding(cell_padding())
             .style(row_number_style),
     );
@@ -179,6 +180,7 @@ fn view_data_row<'a>(
                     .on_press(Message::CellClicked(row_index, c))
                     .padding(cell_padding())
                     .width(width)
+                    .height(ROW_HEIGHT)
                     .style(if alternate {
                         data_cell_alt_style
                     } else {
