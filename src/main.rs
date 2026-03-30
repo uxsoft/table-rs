@@ -5,12 +5,16 @@ use data::formula::evaluate_all_formulas;
 use data::operations::{group_rows, sort_rows};
 use data::{ColumnType, Group, Sheet, SortConfig, SortDirection};
 use iced::widget::{button, column, container, horizontal_space, stack, text};
-use iced::{alignment, Element, Length, Padding, Task, Theme};
+use iced::{alignment, Element, Font, Length, Padding, Task, Theme};
 
 const MENUBAR_HEIGHT: f32 = 30.0;
+const JETBRAINS_NERD_FONT: &[u8] =
+    include_bytes!("../assets/fonts/JetBrainsMonoNerdFont-Regular.ttf");
 
 fn main() -> iced::Result {
     iced::application("Table RS", TableApp::update, TableApp::view)
+        .font(JETBRAINS_NERD_FONT)
+        .default_font(Font::with_name("JetBrainsMono Nerd Font"))
         .theme(|_| Theme::TokyoNight)
         .window_size((1200.0, 700.0))
         .run_with(|| {
