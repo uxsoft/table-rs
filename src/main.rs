@@ -8,13 +8,15 @@ use iced::widget::{button, column, container, horizontal_space, stack, text};
 use iced::{alignment, Element, Font, Length, Padding, Task, Theme};
 
 const MENUBAR_HEIGHT: f32 = 30.0;
-const JETBRAINS_NERD_FONT: &[u8] =
-    include_bytes!("../assets/fonts/JetBrainsMonoNerdFont-Regular.ttf");
+const INTER_FONT: &[u8] = include_bytes!("../assets/fonts/Inter-Regular.ttf");
+const SYMBOLS_NERD_FONT: &[u8] =
+    include_bytes!("../assets/fonts/SymbolsNerdFont-Regular.ttf");
 
 fn main() -> iced::Result {
     iced::application("Table RS", TableApp::update, TableApp::view)
-        .font(JETBRAINS_NERD_FONT)
-        .default_font(Font::with_name("JetBrainsMono Nerd Font"))
+        .font(INTER_FONT)
+        .font(SYMBOLS_NERD_FONT)
+        .default_font(Font::with_name("Inter"))
         .theme(|_| Theme::TokyoNight)
         .window_size((1200.0, 700.0))
         .run_with(|| {
