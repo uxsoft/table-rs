@@ -1,390 +1,363 @@
-use iced::widget::{
-    button, container, mouse_area, row, stack, text, text_input, Column, Row,
-    Scrollable,
+use iced::alignment::Horizontal;
+use iced::widget::{button, column, container, text, text_input, Space};
+use iced::{Background, Border, Element, Length, Padding, Shadow};
+
+use iced_longbridge::components::button::{button_ex, Variant};
+use iced_longbridge::components::collapsible::collapsible;
+use iced_longbridge::components::icon::IconName;
+use iced_longbridge::components::menu::{menu, Item as MenuItem};
+use iced_longbridge::components::popover::popover_dismissable;
+use iced_longbridge::components::table::{
+    table_with, Column, ResizeHandlers, SortDir, TableOptions,
 };
-use iced::{Alignment, Element, Length, Padding};
+use iced_longbridge::theme::{AppTheme, Size};
 
-use crate::data::{ColumnType, Group, Sheet};
-use crate::Message;
+use crate::data::{CellValue, ColumnType, SortDirection};
+use crate::{sort_key_for, Message, TableApp, MAX_SORT_COLS};
 
-const ROW_HEIGHT: f32 = 32.0;
-const HEADER_HEIGHT: f32 = 40.0;
-const ROW_NUMBER_WIDTH: f32 = 32.0;
+type RowRef<'a> = (usize, &'a [CellValue]);
 
-fn cell_padding() -> Padding {
-    Padding::from([4.0, 8.0])
-}
+pub fn view(app: &TableApp) -> Element<'_, Message> {
+    let theme = &app.theme;
 
-pub fn view_table<'a>(
-    sheet: &'a Sheet,
-    editing: Option<(usize, usize)>,
-    edit_value: &'a str,
-    groups: &'a Option<Vec<Group>>,
-    resizing_col: Option<usize>,
-) -> Element<'a, Message> {
-    let header = view_header(sheet, resizing_col);
-
-    let body: Element<'a, Message> = if let Some(groups) = groups {
-        view_grouped_body(sheet, groups, editing, edit_value)
+    let body: Element<'_, Message> = if app.groups.is_some() {
+        grouped_view(app)
     } else {
-        view_flat_body(sheet, editing, edit_value)
+        flat_view(app)
     };
 
-    let scrollable_body = Scrollable::new(body).height(Length::Fill);
-
-    Column::new()
-        .push(header)
-        .push(scrollable_body)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
-}
-
-fn view_header<'a>(sheet: &'a Sheet, resizing_col: Option<usize>) -> Element<'a, Message> {
-    let mut header_row = Row::new()
-        .height(Length::Fixed(HEADER_HEIGHT))
-        .align_y(Alignment::Center);
-
-    // Row number column
-    header_row = header_row.push(
-        container(text("#").size(12))
-            .width(Length::Fixed(ROW_NUMBER_WIDTH))
-            .padding(cell_padding())
-            .style(header_cell_style),
+    let add_row_btn = button_ex(
+        theme,
+        "+ Add row",
+        Variant::Ghost,
+        Size::Sm,
+        Some(Message::AddRow),
+        false,
+        false,
     );
 
-    for (i, col) in sheet.columns.iter().enumerate() {
-        let sort_indicator = match &sheet.sort {
-            Some(s) if s.column == i => match s.direction {
-                crate::data::SortDirection::Ascending => " ▲",
-                crate::data::SortDirection::Descending => " ▼",
-            },
-            _ => "",
-        };
-
-        let type_badge = match &col.col_type {
-            ColumnType::Text => "Aa",
-            ColumnType::Number => "#",
-            ColumnType::Currency(_) => "$",
-            ColumnType::Formula => "fx",
-        };
-
-        // For formula columns, show the expression in the header (like Airtable).
-        let label = if col.col_type == ColumnType::Formula {
-            if let Some(ref expr) = col.formula {
-                format!("fx {} = {}{}", col.name, expr, sort_indicator)
-            } else {
-                format!("fx {} (click to set formula){}", col.name, sort_indicator)
-            }
-        } else {
-            format!("{} {}{}", type_badge, col.name, sort_indicator)
-        };
-
-        let header_btn = button(text(label).size(13))
-            .on_press(Message::HeaderClicked(i))
-            .padding(cell_padding())
-            .width(Length::Fixed(col.width))
-            .height(Length::Fixed(HEADER_HEIGHT))
-            .style(header_button_style);
-
-        let handle_row = crate::components::col_resize_handle::view(
-            i,
-            col.width,
-            HEADER_HEIGHT,
-            resizing_col == Some(i),
-        );
-
-        let cell = stack![
-            header_btn,
-            handle_row,
-        ]
-        .width(Length::Fixed(col.width))
-        .height(Length::Fixed(HEADER_HEIGHT));
-
-        header_row = header_row.push(cell);
-    }
-
-    container(header_row)
-        .style(header_bar_style)
-        .width(Length::Fill)
-        .into()
-}
-
-fn view_flat_body<'a>(
-    sheet: &'a Sheet,
-    editing: Option<(usize, usize)>,
-    edit_value: &'a str,
-) -> Element<'a, Message> {
-    let mut col = Column::new().spacing(0);
-    for r in 0..sheet.rows.len() {
-        col = col.push(view_data_row(sheet, r, editing, edit_value, r % 2 == 1));
-    }
-    col = col.push(view_add_row(sheet));
-    col.width(Length::Fill).into()
-}
-
-fn view_grouped_body<'a>(
-    sheet: &'a Sheet,
-    groups: &'a [Group],
-    editing: Option<(usize, usize)>,
-    edit_value: &'a str,
-) -> Element<'a, Message> {
-    let mut col = Column::new().spacing(0);
-
-    for (gi, group) in groups.iter().enumerate() {
-        // Group header
-        let count_label = format!("{} ({} rows)", group.key, group.row_indices.len());
-        let collapse_label = if group.collapsed { "▶" } else { "▼" };
-
-        let group_header = button(
-            row![
-                text(collapse_label).size(12),
-                text(count_label).size(13),
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center),
-        )
-        .on_press(Message::ToggleGroup(gi))
+    let add_row_container = container(add_row_btn)
         .padding(Padding::from([6.0, 12.0]))
-        .width(Length::Fill)
-        .style(group_header_style);
+        .width(Length::Fill);
 
-        col = col.push(group_header);
+    container(
+        column![body, add_row_container]
+            .spacing(6)
+            .width(Length::Fill),
+    )
+    .padding(Padding::from([8.0, 12.0]))
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .into()
+}
 
-        if !group.collapsed {
-            for (i, &ri) in group.row_indices.iter().enumerate() {
-                col = col.push(view_data_row(sheet, ri, editing, edit_value, i % 2 == 1));
+fn flat_view(app: &TableApp) -> Element<'_, Message> {
+    let rows: Vec<RowRef<'_>> = app
+        .sheet
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (i, r.as_slice()))
+        .collect();
+    let columns = build_columns(app);
+    let options = build_table_options(app, true);
+    let tbl = table_with(&app.theme, &rows, columns, options);
+    // `table_with` returns an Element we can return directly; put it in a
+    // container so the outer column doesn't stretch unboundedly.
+    container(tbl).width(Length::Fill).into()
+}
+
+fn grouped_view(app: &TableApp) -> Element<'_, Message> {
+    let theme = &app.theme;
+    let groups = app.groups.as_ref().expect("grouped_view called without groups");
+    let mut col = column![].spacing(6).width(Length::Fill);
+    for (gi, g) in groups.iter().enumerate() {
+        let group_rows: Vec<RowRef<'_>> = g
+            .row_indices
+            .iter()
+            .filter_map(|&ri| app.sheet.rows.get(ri).map(|r| (ri, r.as_slice())))
+            .collect();
+
+        // Only the first group's table drives resize/sort; avoids duplicate
+        // mouse catchers and lets the user still sort/resize from the top-most
+        // header. Sort/group via sidebar remains available on all groups.
+        let is_primary = gi == 0;
+        let columns = build_columns(app);
+        let options = build_table_options(app, is_primary);
+        let label = format!("{}  ({})", g.key, g.row_indices.len());
+
+        let inner: Element<'_, Message> = if g.collapsed {
+            Space::new().height(Length::Fixed(0.0)).into()
+        } else {
+            table_with(theme, &group_rows, columns, options)
+        };
+
+        col = col.push(collapsible(
+            theme,
+            label,
+            !g.collapsed,
+            Message::ToggleGroup(gi),
+            inner,
+        ));
+    }
+    col.into()
+}
+
+fn build_table_options<'a>(
+    app: &'a TableApp,
+    wire_interactions: bool,
+) -> TableOptions<'a, Message> {
+    let sort = app.sheet.sort.as_ref().and_then(|s| {
+        sort_key_for(s.column).map(|k| {
+            let dir = match s.direction {
+                SortDirection::Ascending => SortDir::Asc,
+                SortDirection::Descending => SortDir::Desc,
+            };
+            (k, dir)
+        })
+    });
+
+    TableOptions {
+        sort,
+        on_sort: if wire_interactions {
+            Some(Box::new(Message::TableSort))
+        } else {
+            None
+        },
+        striped: true,
+        row_height: 34.0,
+        resize: if wire_interactions {
+            Some(ResizeHandlers {
+                on_grab: Box::new(Message::TableResizeStart),
+                on_drag: Box::new(Message::TableResizeMove),
+                on_release: Message::TableResizeEnd,
+                dragging: app.table_resize_col,
+            })
+        } else {
+            None
+        },
+    }
+}
+
+fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> {
+    let theme = app.theme;
+    let mut cols: Vec<Column<'a, RowRef<'a>, Message>> = Vec::new();
+
+    for (ci, def) in app.sheet.columns.iter().enumerate() {
+        let col_width = Length::Fixed(def.width);
+        let col_type = def.col_type.clone();
+        let has_formula = def.formula.is_some();
+        let header = def.name.clone();
+        let is_numeric = matches!(
+            def.col_type,
+            ColumnType::Number | ColumnType::Currency(_) | ColumnType::Formula
+        );
+        let currency_symbol = match &def.col_type {
+            ColumnType::Currency(sym) => sym.clone(),
+            _ => "$".to_string(),
+        };
+        let t = theme;
+        let editing = app.editing;
+        let edit_value = app.edit_value.as_str();
+
+        let render = move |rr: &RowRef<'a>| -> Element<'a, Message> {
+            let (row_idx, cells) = *rr;
+            let cell = cells.get(ci).cloned().unwrap_or(CellValue::Empty);
+            render_cell(
+                &t,
+                row_idx,
+                ci,
+                &cell,
+                &col_type,
+                has_formula,
+                &currency_symbol,
+                editing,
+                edit_value,
+            )
+        };
+
+        let mut c = Column::new(header, render)
+            .width(col_width)
+            .align(if is_numeric {
+                Horizontal::Right
+            } else {
+                Horizontal::Left
+            });
+
+        // Only register sortable keys for columns within the reserved range.
+        if ci < MAX_SORT_COLS {
+            if let Some(key) = sort_key_for(ci) {
+                c = c.sortable(key);
             }
         }
-    }
-    col = col.push(view_add_row(sheet));
 
-    col.width(Length::Fill).into()
+        cols.push(c);
+    }
+
+    // Trailing kebab (row menu) column.
+    let row_menu_open = app.row_menu_open;
+    let clipboard_has_value = app.clipboard_row.is_some();
+    let t = theme;
+    let kebab_col = Column::new("", move |rr: &RowRef<'a>| {
+        let (row_idx, _) = *rr;
+        render_row_menu(&t, row_idx, row_menu_open, clipboard_has_value)
+    })
+    .width(Length::Fixed(44.0))
+    .align(Horizontal::Center);
+    cols.push(kebab_col);
+
+    cols
 }
 
-fn view_data_row<'a>(
-    sheet: &'a Sheet,
-    row_index: usize,
+#[allow(clippy::too_many_arguments)]
+fn render_cell<'a>(
+    theme: &AppTheme,
+    row_idx: usize,
+    col_idx: usize,
+    cell: &CellValue,
+    col_type: &ColumnType,
+    has_formula: bool,
+    currency_symbol: &str,
     editing: Option<(usize, usize)>,
     edit_value: &'a str,
-    alternate: bool,
 ) -> Element<'a, Message> {
-    let row_data = &sheet.rows[row_index];
-    let mut data_row = Row::new()
-        .height(Length::Fixed(ROW_HEIGHT))
-        .align_y(Alignment::Center);
+    let t = *theme;
 
-    // Row number — right-click opens context menu
-    let row_num_cell = container(text(format!("{}", row_index)).size(11))
-        .width(Length::Fixed(ROW_NUMBER_WIDTH))
-        .height(ROW_HEIGHT)
-        .padding(cell_padding())
-        .style(row_number_style);
-
-    data_row = data_row.push(
-        mouse_area(row_num_cell)
-            .on_right_press(Message::RowRightClicked(row_index)),
-    );
-
-    for (c, cell) in row_data.iter().enumerate() {
-        let col_def = &sheet.columns[c];
-        let width = Length::Fixed(col_def.width);
-
-        let cell_element: Element<'a, Message> =
-            if editing == Some((row_index, c)) {
-                let input_id = format!("cell_{}_{}", row_index, c);
-                text_input("", edit_value)
-                    .id(text_input::Id::new(input_id))
-                    .on_input(move |v| Message::CellEdited(row_index, c, v))
-                    .on_submit(Message::CellEditCommit)
-                    .size(13)
-                    .padding(cell_padding())
-                    .width(width)
-                    .into()
-            } else {
-                let currency_sym = match &col_def.col_type {
-                    ColumnType::Currency(s) => s.as_str(),
-                    _ => "$",
-                };
-                let display = cell.display_value(currency_sym);
-                let txt = text(display).size(13);
-
-                // Formula columns are read-only: no on_press handler.
-                let is_formula_col = col_def.col_type == ColumnType::Formula
-                    && col_def.formula.is_some();
-
-                let cell_container = if is_formula_col {
-                    button(txt)
-                        .padding(cell_padding())
-                        .width(width)
-                        .height(ROW_HEIGHT)
-                        .style(formula_cell_style)
-                } else {
-                    button(txt)
-                        .on_press(Message::CellClicked(row_index, c))
-                        .padding(cell_padding())
-                        .width(width)
-                        .height(ROW_HEIGHT)
-                        .style(if alternate {
-                            data_cell_alt_style
-                        } else {
-                            data_cell_style
-                        })
-                };
-
-                cell_container.into()
-            };
-
-        data_row = data_row.push(cell_element);
+    // Inline editor for the focused cell.
+    if editing == Some((row_idx, col_idx)) {
+        return text_input("", edit_value)
+            .on_input(Message::CellEdited)
+            .on_submit(Message::CellEditCommit)
+            .size(13.0)
+            .padding(Padding::from([2.0, 6.0]))
+            .style(move |_, status| cell_input_style(&t, status))
+            .into();
     }
 
-    container(data_row)
+    // Formula cells are read-only.
+    if has_formula || matches!(col_type, ColumnType::Formula) {
+        let display = cell.display_value(currency_symbol);
+        return container(
+            text(display)
+                .size(13.0)
+                .color(t.muted_foreground),
+        )
+        .padding(Padding::from([0.0, 4.0]))
         .width(Length::Fill)
+        .into();
+    }
+
+    // Editable cell: transparent button wraps the text so the whole cell is clickable.
+    let display = cell.display_value(currency_symbol);
+    let label = if display.is_empty() {
+        "·".to_string()
+    } else {
+        display
+    };
+    let label_color = if label == "·" {
+        t.muted_foreground
+    } else {
+        t.foreground
+    };
+
+    button(text(label).size(13.0).color(label_color))
+        .padding(Padding::from([2.0, 6.0]))
+        .width(Length::Fill)
+        .on_press(Message::CellClicked(row_idx, col_idx))
+        .style(move |_, status| cell_button_style(&t, status))
         .into()
 }
 
-fn view_add_row<'a>(sheet: &'a Sheet) -> Element<'a, Message> {
-    let total_width: f32 =
-        ROW_NUMBER_WIDTH + sheet.columns.iter().map(|c| c.width).sum::<f32>();
+fn render_row_menu<'a>(
+    theme: &AppTheme,
+    row_idx: usize,
+    row_menu_open: Option<usize>,
+    clipboard_has_value: bool,
+) -> Element<'a, Message> {
+    let t = *theme;
+    let is_open = row_menu_open == Some(row_idx);
 
-    let add_btn = button(
-        container(text("+ Add row").size(12))
-            .width(Length::Fixed(total_width))
-            .padding(cell_padding()),
+    let trigger: Element<'_, Message> = button(
+        text("⋮")
+            .size(16.0)
+            .color(t.muted_foreground)
+            .align_x(Horizontal::Center),
     )
-    .on_press(Message::AddRow)
-    .height(Length::Fixed(ROW_HEIGHT))
-    .width(Length::Fixed(total_width))
-    .style(add_row_style);
+    .padding(Padding::from([2.0, 8.0]))
+    .width(Length::Fixed(32.0))
+    .on_press(Message::RowMenuToggle(Some(row_idx)))
+    .style(move |_, status| cell_button_style(&t, status))
+    .into();
 
-    container(add_btn).width(Length::Fill).into()
+    let panel = is_open.then(|| {
+        let mut items: Vec<MenuItem<Message>> = vec![
+            MenuItem::new("Cut", Message::CutRow(row_idx))
+                .icon(IconName::Trash)
+                .shortcut("⌘X"),
+            MenuItem::new("Copy", Message::CopyRow(row_idx))
+                .icon(IconName::Copy)
+                .shortcut("⌘C"),
+        ];
+        let mut paste = MenuItem::new("Paste", Message::PasteRow(row_idx))
+            .icon(IconName::Download)
+            .shortcut("⌘V");
+        if !clipboard_has_value {
+            paste = paste.disabled();
+        }
+        items.push(paste);
+        items.push(MenuItem::Separator);
+        items.push(
+            MenuItem::new("Delete row", Message::DeleteRow(row_idx))
+                .icon(IconName::Trash)
+                .danger(),
+        );
+        menu(theme, items)
+    });
+
+    popover_dismissable(theme, trigger, panel, Message::RowMenuToggle(None))
 }
 
-// -- Styles --
-
-fn header_bar_style(theme: &iced::Theme) -> container::Style {
-    let palette = theme.extended_palette();
-    container::Style {
-        background: Some(palette.primary.weak.color.into()),
-        ..Default::default()
+fn cell_input_style(t: &AppTheme, status: iced::widget::text_input::Status) -> iced::widget::text_input::Style {
+    use iced::widget::text_input::Status::*;
+    let (border_color, border_width) = match status {
+        Focused { .. } => (t.ring, 2.0),
+        _ => (t.primary, 1.0),
+    };
+    iced::widget::text_input::Style {
+        background: Background::Color(t.background),
+        border: Border {
+            color: border_color,
+            width: border_width,
+            radius: 3.0.into(),
+        },
+        icon: t.muted_foreground,
+        placeholder: t.muted_foreground,
+        value: t.foreground,
+        selection: iced_longbridge::theme::with_alpha(t.primary, 0.3),
     }
 }
 
-fn header_cell_style(_theme: &iced::Theme) -> container::Style {
-    container::Style {
-        ..Default::default()
-    }
-}
-
-fn header_button_style(theme: &iced::Theme, _status: button::Status) -> button::Style {
-    let palette = theme.extended_palette();
-    button::Style {
-        background: Some(palette.primary.weak.color.into()),
-        text_color: palette.primary.weak.text,
-        border: iced::Border {
-            color: palette.primary.strong.color,
+fn cell_button_style(
+    t: &AppTheme,
+    status: iced::widget::button::Status,
+) -> iced::widget::button::Style {
+    use iced::widget::button::Status::*;
+    let bg = match status {
+        Hovered => Some(Background::Color(iced_longbridge::theme::with_alpha(
+            t.accent, 0.6,
+        ))),
+        Pressed => Some(Background::Color(t.accent)),
+        _ => None,
+    };
+    iced::widget::button::Style {
+        background: bg,
+        text_color: t.foreground,
+        border: Border {
+            color: iced::Color::TRANSPARENT,
             width: 0.0,
-            radius: 0.0.into(),
+            radius: 3.0.into(),
         },
-        ..Default::default()
-    }
-}
-
-fn data_cell_style(theme: &iced::Theme, status: button::Status) -> button::Style {
-    let palette = theme.extended_palette();
-    let bg = match status {
-        button::Status::Hovered => palette.background.weak.color,
-        _ => palette.background.base.color,
-    };
-    button::Style {
-        background: Some(bg.into()),
-        text_color: palette.background.base.text,
-        border: iced::Border {
-            color: palette.background.weak.color,
-            width: 0.5,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
-fn formula_cell_style(theme: &iced::Theme, _status: button::Status) -> button::Style {
-    let palette = theme.extended_palette();
-    // Slightly tinted background to indicate read-only computed value.
-    button::Style {
-        background: Some(
-            iced::Color {
-                r: palette.primary.weak.color.r,
-                g: palette.primary.weak.color.g,
-                b: palette.primary.weak.color.b,
-                a: 0.12,
-            }
-            .into(),
-        ),
-        text_color: palette.background.base.text,
-        border: iced::Border {
-            color: palette.background.weak.color,
-            width: 0.5,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
-fn data_cell_alt_style(theme: &iced::Theme, status: button::Status) -> button::Style {
-    let palette = theme.extended_palette();
-    let bg = match status {
-        button::Status::Hovered => palette.background.weak.color,
-        _ => palette.background.weak.color,
-    };
-    button::Style {
-        background: Some(bg.into()),
-        text_color: palette.background.weak.text,
-        border: iced::Border {
-            color: palette.background.weak.color,
-            width: 0.5,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
-fn group_header_style(theme: &iced::Theme, _status: button::Status) -> button::Style {
-    let palette = theme.extended_palette();
-    button::Style {
-        background: Some(palette.primary.weak.color.into()),
-        text_color: palette.primary.weak.text,
-        border: iced::Border {
-            color: palette.primary.strong.color,
-            width: 0.0,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
-    }
-}
-
-fn row_number_style(theme: &iced::Theme) -> container::Style {
-    let palette = theme.extended_palette();
-    container::Style {
-        background: Some(palette.background.weak.color.into()),
-        ..Default::default()
-    }
-}
-
-fn add_row_style(theme: &iced::Theme, status: button::Status) -> button::Style {
-    let palette = theme.extended_palette();
-    let bg = match status {
-        button::Status::Hovered => palette.background.weak.color,
-        _ => palette.background.base.color,
-    };
-    button::Style {
-        background: Some(bg.into()),
-        text_color: palette.background.base.text.scale_alpha(0.5),
-        border: iced::Border {
-            color: palette.background.weak.color,
-            width: 0.5,
-            radius: 0.0.into(),
-        },
-        ..Default::default()
+        shadow: Shadow::default(),
+        snap: true,
     }
 }

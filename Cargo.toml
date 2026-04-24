@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-iced = { version = "0.13", features = ["tokio"] }
+iced = { version = "0.14", features = ["advanced", "canvas", "tokio", "lazy"] }
+iced-longbridge = { git = "https://github.com/uxsoft/iced-longbridge", branch = "master" }
 csv = "1"
 evalexpr = "11"
 serde = { version = "1", features = ["derive"] }
