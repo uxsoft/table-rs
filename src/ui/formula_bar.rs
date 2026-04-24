@@ -1,10 +1,23 @@
-use iced::widget::{container, row as iced_row, text};
+use iced::widget::{column as iced_column, container, row as iced_row, text};
 use iced::{Background, Border, Element, Length, Padding, Shadow};
 use iced_longbridge::components::button::{button_ex, Variant};
+use iced_longbridge::components::hover_card::hover_card;
+use iced_longbridge::components::icon::IconName;
 use iced_longbridge::components::input::input_sized;
+use iced_longbridge::components::popover::popover_dismissable;
+use iced_longbridge::components::tooltip::wrap as tooltip_wrap;
 use iced_longbridge::theme::Size;
 
 use crate::{Message, TableApp};
+
+const SYNTAX_HELP: &str = "Formula syntax\n\n\
+    {ColumnName}   value of that column in this row\n\
+    + - * /        arithmetic\n\
+    ( )            grouping\n\
+\n\
+Examples\n\
+    {Price} * {Quantity}\n\
+    ({Value} + 10) / 2";
 
 pub fn view(app: &TableApp) -> Option<Element<'_, Message>> {
     let col = app.editing_formula_col?;
@@ -18,24 +31,97 @@ pub fn view(app: &TableApp) -> Option<Element<'_, Message>> {
         .map(|c| c.name.clone())
         .unwrap_or_else(|| format!("col_{col}"));
 
-    let fx_label = text("fx")
+    let fx_trigger: Element<'_, Message> = text("fx")
         .size(13.0)
         .color(theme.muted_foreground)
-        .width(Length::Fixed(22.0));
+        .width(Length::Fixed(22.0))
+        .into();
+    let fx_help: Element<'_, Message> = text(SYNTAX_HELP)
+        .size(12.0)
+        .color(theme.popover_foreground)
+        .into();
+    let fx_label = hover_card(theme, fx_trigger, fx_help);
 
     let col_label = text(col_name)
         .size(13.0)
         .color(theme.foreground)
         .width(Length::Fixed(120.0));
 
-    let input = input_sized(theme, Size::Sm, "= expression…", &app.editing_formula_value)
-        .on_input(Message::FormulaChanged)
-        .on_submit(Message::FormulaEditCommit)
-        .width(Length::Fill);
+    let input: Element<'_, Message> =
+        input_sized(theme, Size::Sm, "= expression…", &app.editing_formula_value)
+            .on_input(Message::FormulaChanged)
+            .on_submit(Message::FormulaEditCommit)
+            .width(Length::Fill)
+            .into();
+
+    let suggestions = app.formula_suggestions();
+    let suggestion_panel: Option<Element<'_, Message>> = if suggestions.is_empty() {
+        None
+    } else {
+        let selected = app.formula_suggestions_selected.min(suggestions.len() - 1);
+        let rows: Vec<Element<'_, Message>> = suggestions
+            .iter()
+            .enumerate()
+            .map(|(i, (_col_idx, name))| {
+                let variant = if i == selected {
+                    Variant::Secondary
+                } else {
+                    Variant::Ghost
+                };
+                button_ex(
+                    theme,
+                    name.clone(),
+                    variant,
+                    Size::Sm,
+                    Some(Message::FormulaSuggestionClick(i)),
+                    false,
+                    false,
+                )
+            })
+            .collect();
+        Some(
+            iced_column(rows)
+                .spacing(2)
+                .width(Length::Fixed(220.0))
+                .into(),
+        )
+    };
+
+    let input_with_popover =
+        popover_dismissable(theme, input, suggestion_panel, Message::FormulaEscape);
+
+    let error_slot: Element<'_, Message> = if let Some(err) = &app.formula_error {
+        let dot: Element<'_, Message> = container(text(""))
+            .width(Length::Fixed(8.0))
+            .height(Length::Fixed(8.0))
+            .style(move |_| container::Style {
+                background: Some(Background::Color(t.danger)),
+                text_color: Some(t.danger_foreground),
+                border: Border {
+                    color: t.danger,
+                    width: 0.0,
+                    radius: 4.0.into(),
+                },
+                shadow: Shadow::default(),
+                snap: true,
+            })
+            .into();
+        let wrapper: Element<'_, Message> = container(dot)
+            .width(Length::Fixed(14.0))
+            .height(Length::Fixed(22.0))
+            .padding(Padding::from([7.0, 3.0]))
+            .into();
+        tooltip_wrap(theme, wrapper, format!("Formula didn't evaluate: {err}")).into()
+    } else {
+        container(text(""))
+            .width(Length::Fixed(14.0))
+            .height(Length::Fixed(22.0))
+            .into()
+    };
 
     let commit = button_ex(
         theme,
-        "Apply",
+        IconName::Check.glyph(),
         Variant::Primary,
         Size::Sm,
         Some(Message::FormulaEditCommit),
@@ -45,7 +131,7 @@ pub fn view(app: &TableApp) -> Option<Element<'_, Message>> {
 
     let cancel = button_ex(
         theme,
-        "Cancel",
+        IconName::Close.glyph(),
         Variant::Ghost,
         Size::Sm,
         Some(Message::FormulaEditCancel),
@@ -53,7 +139,7 @@ pub fn view(app: &TableApp) -> Option<Element<'_, Message>> {
         false,
     );
 
-    let bar = iced_row![fx_label, col_label, input, commit, cancel]
+    let bar = iced_row![fx_label, col_label, input_with_popover, error_slot, commit, cancel]
         .spacing(8)
         .align_y(iced::alignment::Vertical::Center);
 

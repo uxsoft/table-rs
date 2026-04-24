@@ -158,6 +158,7 @@ fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> 
         };
         let t = theme;
         let editing = app.editing;
+        let selected = app.selected_cell;
         let edit_value = app.edit_value.as_str();
 
         let render = move |rr: &RowRef<'a>| -> Element<'a, Message> {
@@ -172,6 +173,7 @@ fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> 
                 has_formula,
                 &currency_symbol,
                 editing,
+                selected,
                 edit_value,
             )
         };
@@ -219,15 +221,17 @@ fn render_cell<'a>(
     has_formula: bool,
     currency_symbol: &str,
     editing: Option<(usize, usize)>,
+    selected: Option<(usize, usize)>,
     edit_value: &'a str,
 ) -> Element<'a, Message> {
     let t = *theme;
+    let is_selected = selected == Some((row_idx, col_idx)) && editing != Some((row_idx, col_idx));
 
     // Inline editor for the focused cell.
     if editing == Some((row_idx, col_idx)) {
         return text_input("", edit_value)
             .on_input(Message::CellEdited)
-            .on_submit(Message::CellEditCommit)
+            .on_submit(Message::CellEditSubmit)
             .size(13.0)
             .padding(Padding::from([2.0, 6.0]))
             .style(move |_, status| cell_input_style(&t, status))
@@ -264,7 +268,7 @@ fn render_cell<'a>(
         .padding(Padding::from([2.0, 6.0]))
         .width(Length::Fill)
         .on_press(Message::CellClicked(row_idx, col_idx))
-        .style(move |_, status| cell_button_style(&t, status))
+        .style(move |_, status| cell_button_style(&t, status, is_selected))
         .into()
 }
 
@@ -286,7 +290,7 @@ fn render_row_menu<'a>(
     .padding(Padding::from([2.0, 8.0]))
     .width(Length::Fixed(32.0))
     .on_press(Message::RowMenuToggle(Some(row_idx)))
-    .style(move |_, status| cell_button_style(&t, status))
+    .style(move |_, status| cell_button_style(&t, status, false))
     .into();
 
     let panel = is_open.then(|| {
@@ -340,6 +344,7 @@ fn cell_input_style(t: &AppTheme, status: iced::widget::text_input::Status) -> i
 fn cell_button_style(
     t: &AppTheme,
     status: iced::widget::button::Status,
+    is_selected: bool,
 ) -> iced::widget::button::Style {
     use iced::widget::button::Status::*;
     let bg = match status {
@@ -347,14 +352,22 @@ fn cell_button_style(
             t.accent, 0.6,
         ))),
         Pressed => Some(Background::Color(t.accent)),
+        _ if is_selected => Some(Background::Color(iced_longbridge::theme::with_alpha(
+            t.accent, 0.4,
+        ))),
         _ => None,
+    };
+    let (border_color, border_width) = if is_selected {
+        (t.primary, 1.5)
+    } else {
+        (iced::Color::TRANSPARENT, 0.0)
     };
     iced::widget::button::Style {
         background: bg,
         text_color: t.foreground,
         border: Border {
-            color: iced::Color::TRANSPARENT,
-            width: 0.0,
+            color: border_color,
+            width: border_width,
             radius: 3.0.into(),
         },
         shadow: Shadow::default(),

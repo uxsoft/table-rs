@@ -1,6 +1,7 @@
 pub mod csv_io;
 pub mod formula;
 pub mod operations;
+pub mod recent;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

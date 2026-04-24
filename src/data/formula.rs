@@ -140,6 +140,52 @@ pub fn evaluate_formula(sheet: &Sheet, expr: &str) -> Result<f64, String> {
     }
 }
 
+/// Locate the last unclosed `{` in `s` and return its byte index plus the
+/// partial text after it. Returns `None` when every `{` has a matching `}`
+/// after it (or when there's no `{` at all).
+///
+/// Used by the formula editor to decide whether to show the column-name
+/// autocomplete popover and what to match against.
+pub fn last_open_brace_partial(s: &str) -> Option<(usize, &str)> {
+    let open_idx = s.rfind('{')?;
+    let partial = &s[open_idx + 1..];
+    if partial.contains('}') {
+        return None;
+    }
+    Some((open_idx, partial))
+}
+
+/// Replace the substring of `formula` from `brace_idx` to the end with
+/// `{name}`. Used to accept an autocomplete suggestion: `{Val` + `Value`
+/// → `{Value}`.
+pub fn apply_suggestion(formula: &str, brace_idx: usize, name: &str) -> String {
+    let mut out = String::with_capacity(brace_idx + name.len() + 2);
+    out.push_str(&formula[..brace_idx]);
+    out.push('{');
+    out.push_str(name);
+    out.push('}');
+    out
+}
+
+/// Filter `names` to those starting with `partial` (case-insensitive),
+/// preserving order. Returns `(original_index, name)` pairs. When
+/// `exclude_idx` is set, that index is skipped (self-reference makes no
+/// sense in a column formula).
+pub fn match_suggestions<'a>(
+    names: &[&'a str],
+    partial: &str,
+    exclude_idx: Option<usize>,
+) -> Vec<(usize, &'a str)> {
+    let partial_lower = partial.to_lowercase();
+    names
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| Some(*i) != exclude_idx)
+        .filter(|(_, n)| n.to_lowercase().starts_with(&partial_lower))
+        .map(|(i, n)| (i, *n))
+        .collect()
+}
+
 /// Evaluate a column-level formula (Airtable-style) for a specific row.
 ///
 /// The formula uses `{ColumnName}` placeholders that are resolved to the
@@ -163,13 +209,10 @@ pub fn evaluate_column_formula(sheet: &Sheet, expr: &str, row_idx: usize) -> Res
 
         resolved.push_str(&expr[last_end..full.start()]);
 
-        let value = sheet
-            .columns
-            .iter()
-            .position(|c| c.name == col_name)
-            .and_then(|ci| row.get(ci))
-            .and_then(|cell| cell.as_f64())
-            .unwrap_or(0.0);
+        let Some(ci) = sheet.columns.iter().position(|c| c.name == col_name) else {
+            return Err(format!("Unknown column: {col_name}"));
+        };
+        let value = row.get(ci).and_then(|cell| cell.as_f64()).unwrap_or(0.0);
 
         resolved.push_str(&format!("{}", value));
         last_end = full.end();
@@ -242,3 +285,132 @@ pub fn evaluate_all_formulas(sheet: &mut Sheet) {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::{CellValue, ColumnDef, ColumnType, Sheet};
+
+    fn sheet_with(columns: Vec<(&str, ColumnType)>, rows: Vec<Vec<CellValue>>) -> Sheet {
+        Sheet {
+            columns: columns
+                .into_iter()
+                .map(|(name, col_type)| ColumnDef {
+                    name: name.to_string(),
+                    col_type,
+                    width: 100.0,
+                    formula: None,
+                })
+                .collect(),
+            rows,
+            file_path: None,
+            sort: None,
+            group_by: None,
+        }
+    }
+
+    #[test]
+    fn evaluate_column_formula_errors_on_unknown_placeholder() {
+        let sheet = sheet_with(
+            vec![("Value", ColumnType::Number)],
+            vec![vec![CellValue::Number(10.0)]],
+        );
+        let err = evaluate_column_formula(&sheet, "{Valu}", 0).expect_err("should error");
+        assert!(
+            err.contains("Unknown column"),
+            "expected unknown-column error, got: {err}"
+        );
+        assert!(
+            err.contains("Valu"),
+            "expected error to name the missing column, got: {err}"
+        );
+    }
+
+    #[test]
+    fn evaluate_column_formula_tolerates_non_numeric_cells() {
+        let sheet = sheet_with(
+            vec![
+                ("Value", ColumnType::Number),
+                ("Other", ColumnType::Number),
+            ],
+            vec![vec![CellValue::Number(5.0), CellValue::Empty]],
+        );
+        let val = evaluate_column_formula(&sheet, "{Value} + {Other}", 0).unwrap();
+        assert_eq!(val, 5.0);
+    }
+
+    #[test]
+    fn last_open_brace_partial_none_when_no_brace() {
+        assert_eq!(last_open_brace_partial(""), None);
+        assert_eq!(last_open_brace_partial("abc + 1"), None);
+    }
+
+    #[test]
+    fn last_open_brace_partial_returns_empty_partial_for_bare_brace() {
+        assert_eq!(last_open_brace_partial("{"), Some((0, "")));
+        assert_eq!(last_open_brace_partial("1 + {"), Some((4, "")));
+    }
+
+    #[test]
+    fn last_open_brace_partial_returns_partial_text() {
+        assert_eq!(last_open_brace_partial("{abc"), Some((0, "abc")));
+        assert_eq!(last_open_brace_partial("1 + {Val"), Some((4, "Val")));
+    }
+
+    #[test]
+    fn last_open_brace_partial_none_when_closed() {
+        assert_eq!(last_open_brace_partial("{abc}"), None);
+        assert_eq!(last_open_brace_partial("{a} + {b}"), None);
+    }
+
+    #[test]
+    fn last_open_brace_partial_finds_last_of_multiple_opens() {
+        assert_eq!(last_open_brace_partial("{a} + {xy"), Some((6, "xy")));
+        assert_eq!(last_open_brace_partial("{foo}{bar"), Some((5, "bar")));
+    }
+
+    #[test]
+    fn match_suggestions_case_insensitive_starts_with() {
+        let names = vec!["Value", "Volume", "Price", "Quantity"];
+        let got = match_suggestions(&names, "v", None);
+        assert_eq!(got, vec![(0, "Value"), (1, "Volume")]);
+
+        let got = match_suggestions(&names, "V", None);
+        assert_eq!(got, vec![(0, "Value"), (1, "Volume")]);
+
+        let got = match_suggestions(&names, "pri", None);
+        assert_eq!(got, vec![(2, "Price")]);
+    }
+
+    #[test]
+    fn match_suggestions_empty_partial_returns_all() {
+        let names = vec!["A", "B", "C"];
+        let got = match_suggestions(&names, "", None);
+        assert_eq!(got, vec![(0, "A"), (1, "B"), (2, "C")]);
+    }
+
+    #[test]
+    fn match_suggestions_excludes_self_column() {
+        let names = vec!["Value", "Volume", "Price"];
+        let got = match_suggestions(&names, "v", Some(0));
+        assert_eq!(got, vec![(1, "Volume")]);
+    }
+
+    #[test]
+    fn match_suggestions_returns_empty_when_nothing_matches() {
+        let names = vec!["A", "B"];
+        let got = match_suggestions(&names, "xyz", None);
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn apply_suggestion_replaces_partial_and_closes_brace() {
+        assert_eq!(apply_suggestion("{Val", 0, "Value"), "{Value}");
+        assert_eq!(apply_suggestion("1 + {Val", 4, "Value"), "1 + {Value}");
+        assert_eq!(apply_suggestion("{A} + {", 6, "Beta"), "{A} + {Beta}");
+    }
+
+    #[test]
+    fn apply_suggestion_handles_empty_partial() {
+        assert_eq!(apply_suggestion("{", 0, "Value"), "{Value}");
+    }
+}
