@@ -1,11 +1,10 @@
-use iced::alignment::Horizontal;
-use iced::widget::{button, column, container, text, text_input, Space};
+use iced::alignment::{Horizontal, Vertical};
+use iced::widget::{button, column, container, row as iced_row, text, text_input, Space};
 use iced::{Background, Border, Element, Length, Padding, Shadow};
 
-use iced_longbridge::components::button::{button_ex, Variant};
+use iced_longbridge::components::button::Variant;
 use iced_longbridge::components::collapsible::collapsible;
 use iced_longbridge::components::context_menu::ContextMenu;
-use iced_longbridge::components::icon::IconName;
 use iced_longbridge::components::menu::{menu, Item as MenuItem};
 use iced_longbridge::components::popover::popover_dismissable;
 use iced_longbridge::components::table::{
@@ -14,6 +13,7 @@ use iced_longbridge::components::table::{
 use iced_longbridge::theme::{AppTheme, Size};
 
 use crate::data::{CellValue, ColumnType, SortDirection};
+use crate::ui::icons::{icon, icon_button, icon_colored, IconKind};
 use crate::{sort_key_for, Message, TableApp, MAX_SORT_COLS};
 
 type RowRef<'a> = (usize, &'a [CellValue]);
@@ -27,13 +27,17 @@ pub fn view(app: &TableApp) -> Element<'_, Message> {
         flat_view(app)
     };
 
-    let add_row_btn = button_ex(
+    let add_row_btn = icon_button(
         theme,
-        "+ Add row",
+        iced_row![
+            icon(theme, IconKind::Plus, 12.0),
+            text("Add row").size(13.0).color(theme.foreground),
+        ]
+        .spacing(6)
+        .align_y(Vertical::Center),
         Variant::Ghost,
         Size::Sm,
         Some(Message::AddRow),
-        false,
         false,
     );
 
@@ -263,18 +267,16 @@ fn render_cell<'a>(
         .into()
     } else {
         let display = cell.display_value(currency_symbol);
-        let label = if display.is_empty() {
-            "·".to_string()
+        let body: Element<'a, Message> = if display.is_empty() {
+            container(icon_colored(IconKind::Dot, 12.0, t.muted_foreground))
+                .height(Length::Fixed(18.0))
+                .align_y(Vertical::Center)
+                .into()
         } else {
-            display
-        };
-        let label_color = if label == "·" {
-            t.muted_foreground
-        } else {
-            t.foreground
+            text(display).size(13.0).color(t.foreground).into()
         };
 
-        button(text(label).size(13.0).color(label_color))
+        button(body)
             .padding(Padding::from([2.0, 6.0]))
             .width(Length::Fill)
             .on_press(Message::CellClicked(row_idx, col_idx))
@@ -303,23 +305,15 @@ fn cell_context_items(
 ) -> Vec<MenuItem<Message>> {
     let mut items: Vec<MenuItem<Message>> = Vec::new();
 
-    let mut cut = MenuItem::new("Cut", Message::CutCell(row, col))
-        .icon(IconName::Trash)
-        .shortcut("⌘X");
+    let mut cut = MenuItem::new("Cut", Message::CutCell(row, col)).shortcut("⌘X");
     if is_formula {
         cut = cut.disabled();
     }
     items.push(cut);
 
-    items.push(
-        MenuItem::new("Copy", Message::CopyCell(row, col))
-            .icon(IconName::Copy)
-            .shortcut("⌘C"),
-    );
+    items.push(MenuItem::new("Copy", Message::CopyCell(row, col)).shortcut("⌘C"));
 
-    let mut paste = MenuItem::new("Paste", Message::PasteCell(row, col))
-        .icon(IconName::Download)
-        .shortcut("⌘V");
+    let mut paste = MenuItem::new("Paste", Message::PasteCell(row, col)).shortcut("⌘V");
     if !clipboard_cell_some || is_formula {
         paste = paste.disabled();
     }
@@ -345,19 +339,13 @@ fn cell_context_items(
         Message::InsertRowBelow(row),
     ));
 
-    let mut paste_row = MenuItem::new("Paste row", Message::PasteRow(row))
-        .icon(IconName::Download)
-        .shortcut("⇧⌘V");
+    let mut paste_row = MenuItem::new("Paste row", Message::PasteRow(row)).shortcut("⇧⌘V");
     if !clipboard_row_some {
         paste_row = paste_row.disabled();
     }
     items.push(paste_row);
 
-    items.push(
-        MenuItem::new("Delete row", Message::DeleteRow(row))
-            .icon(IconName::Trash)
-            .danger(),
-    );
+    items.push(MenuItem::new("Delete row", Message::DeleteRow(row)).danger());
 
     items.push(MenuItem::Separator);
 
@@ -370,9 +358,7 @@ fn cell_context_items(
         Message::InsertColumnRight(col),
     ));
 
-    let mut delete_col = MenuItem::new("Delete column", Message::DeleteColumn(col))
-        .icon(IconName::Trash)
-        .danger();
+    let mut delete_col = MenuItem::new("Delete column", Message::DeleteColumn(col)).danger();
     if only_one_column {
         delete_col = delete_col.disabled();
     }
@@ -391,10 +377,13 @@ fn render_row_menu<'a>(
     let is_open = row_menu_open == Some(row_idx);
 
     let trigger: Element<'_, Message> = button(
-        text("⋮")
-            .size(16.0)
-            .color(t.muted_foreground)
-            .align_x(Horizontal::Center),
+        container(icon_colored(
+            IconKind::EllipsisVertical,
+            16.0,
+            t.muted_foreground,
+        ))
+        .width(Length::Fill)
+        .align_x(Horizontal::Center),
     )
     .padding(Padding::from([2.0, 8.0]))
     .width(Length::Fixed(32.0))
@@ -404,26 +393,16 @@ fn render_row_menu<'a>(
 
     let panel = is_open.then(|| {
         let mut items: Vec<MenuItem<Message>> = vec![
-            MenuItem::new("Cut", Message::CutRow(row_idx))
-                .icon(IconName::Trash)
-                .shortcut("⌘X"),
-            MenuItem::new("Copy", Message::CopyRow(row_idx))
-                .icon(IconName::Copy)
-                .shortcut("⌘C"),
+            MenuItem::new("Cut", Message::CutRow(row_idx)).shortcut("⌘X"),
+            MenuItem::new("Copy", Message::CopyRow(row_idx)).shortcut("⌘C"),
         ];
-        let mut paste = MenuItem::new("Paste", Message::PasteRow(row_idx))
-            .icon(IconName::Download)
-            .shortcut("⌘V");
+        let mut paste = MenuItem::new("Paste", Message::PasteRow(row_idx)).shortcut("⌘V");
         if !clipboard_has_value {
             paste = paste.disabled();
         }
         items.push(paste);
         items.push(MenuItem::Separator);
-        items.push(
-            MenuItem::new("Delete row", Message::DeleteRow(row_idx))
-                .icon(IconName::Trash)
-                .danger(),
-        );
+        items.push(MenuItem::new("Delete row", Message::DeleteRow(row_idx)).danger());
         menu(theme, items)
     });
 

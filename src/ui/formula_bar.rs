@@ -2,12 +2,12 @@ use iced::widget::{column as iced_column, container, row as iced_row, text};
 use iced::{Background, Border, Element, Length, Padding, Shadow};
 use iced_longbridge::components::button::{button_ex, Variant};
 use iced_longbridge::components::hover_card::hover_card;
-use iced_longbridge::components::icon::IconName;
 use iced_longbridge::components::input::input_sized;
 use iced_longbridge::components::popover::popover_dismissable;
 use iced_longbridge::components::tooltip::wrap as tooltip_wrap;
 use iced_longbridge::theme::Size;
 
+use crate::ui::icons::{icon, icon_button, icon_colored, IconKind};
 use crate::{Message, TableApp};
 
 const SYNTAX_HELP: &str = "Formula syntax\n\n\
@@ -31,11 +31,14 @@ pub fn view(app: &TableApp) -> Option<Element<'_, Message>> {
         .map(|c| c.name.clone())
         .unwrap_or_else(|| format!("col_{col}"));
 
-    let fx_trigger: Element<'_, Message> = text("fx")
-        .size(13.0)
-        .color(theme.muted_foreground)
-        .width(Length::Fixed(22.0))
-        .into();
+    let fx_trigger: Element<'_, Message> = container(icon_colored(
+        IconKind::FunctionSquare,
+        16.0,
+        theme.muted_foreground,
+    ))
+    .width(Length::Fixed(22.0))
+    .align_x(iced::alignment::Horizontal::Center)
+    .into();
     let fx_help: Element<'_, Message> = text(SYNTAX_HELP)
         .size(12.0)
         .color(theme.popover_foreground)
@@ -119,23 +122,21 @@ pub fn view(app: &TableApp) -> Option<Element<'_, Message>> {
             .into()
     };
 
-    let commit = button_ex(
+    let commit = icon_button(
         theme,
-        IconName::Check.glyph(),
+        icon_colored(IconKind::Check, 14.0, theme.primary_foreground),
         Variant::Primary,
         Size::Sm,
         Some(Message::FormulaEditCommit),
         false,
-        false,
     );
 
-    let cancel = button_ex(
+    let cancel = icon_button(
         theme,
-        IconName::Close.glyph(),
+        icon(theme, IconKind::Close, 14.0),
         Variant::Ghost,
         Size::Sm,
         Some(Message::FormulaEditCancel),
-        false,
         false,
     );
 

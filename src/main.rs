@@ -9,17 +9,18 @@ use data::operations::{group_rows, sort_rows};
 use data::{CellValue, ColumnType, Group, Sheet, SortConfig, SortDirection};
 
 use iced::alignment::Vertical;
-use iced::widget::{column, container, row, text};
+use iced::widget::{column, container, row};
 use iced::{
     Background, Border, Element, Font, Length, Padding, Point, Shadow, Subscription,
     Task, Theme,
 };
-use iced_longbridge::components::button::{button_ex, Variant};
-use iced_longbridge::components::icon::IconName;
+use iced_longbridge::components::button::Variant;
 use iced_longbridge::components::menu::Item;
 use iced_longbridge::components::menu_bar::{menu_bar, MenuBarMenu};
 use iced_longbridge::components::notification::{notification_layer, NotificationKind};
 use iced_longbridge::theme::{AppTheme, Appearance, Size};
+
+use crate::ui::icons::{icon, icon_button, IconKind};
 
 const INTER_FONT: &[u8] = include_bytes!("../assets/fonts/Inter-Regular.ttf");
 const SYMBOLS_NERD_FONT: &[u8] =
@@ -851,27 +852,22 @@ impl TableApp {
     fn view(&self) -> Element<'_, Message> {
         let theme = &self.theme;
 
-        let theme_toggle_label = match self.theme.appearance {
-            Appearance::Light => "☾",
-            Appearance::Dark => "☀",
+        let theme_toggle_kind = match self.theme.appearance {
+            Appearance::Light => IconKind::Moon,
+            Appearance::Dark => IconKind::Sun,
         };
-        let theme_toggle: Element<'_, Message> = button_ex(
+        let theme_toggle: Element<'_, Message> = icon_button(
             theme,
-            theme_toggle_label,
+            icon(theme, theme_toggle_kind, 16.0),
             Variant::Ghost,
             Size::Sm,
             Some(Message::ThemeToggle),
             false,
-            false,
         );
 
         let mut file_items = vec![
-            Item::new("Open", Message::FileOpen)
-                .icon(IconName::Folder)
-                .shortcut("Ctrl+O"),
-            Item::new("Save", Message::FileSave)
-                .icon(IconName::Save)
-                .shortcut("Ctrl+S"),
+            Item::new("Open", Message::FileOpen).shortcut("Ctrl+O"),
+            Item::new("Save", Message::FileSave).shortcut("Ctrl+S"),
         ];
         if !self.recent_files.is_empty() {
             file_items.push(Item::Separator);
@@ -891,7 +887,7 @@ impl TableApp {
         let t = *theme;
         let chrome = container(
             row![
-                text("▦").size(14.0).color(t.foreground),
+                icon(theme, IconKind::PanelLeft, 14.0),
                 menubar,
                 theme_toggle,
             ]

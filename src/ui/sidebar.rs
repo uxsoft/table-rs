@@ -1,3 +1,4 @@
+use iced::alignment::Vertical;
 use iced::widget::{column, row as iced_row, text};
 use iced::{Element, Length};
 use iced_longbridge::components::button::{button_ex, Variant};
@@ -7,6 +8,7 @@ use iced_longbridge::components::sidebar::{Group, Sidebar};
 use iced_longbridge::theme::Size;
 
 use crate::data::{ColumnType, SortDirection};
+use crate::ui::icons::{icon, icon_button, icon_colored, IconKind};
 use crate::{Message, TableApp};
 
 pub fn view(app: &TableApp) -> Element<'_, Message> {
@@ -45,13 +47,18 @@ pub fn view(app: &TableApp) -> Element<'_, Message> {
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str())
             .unwrap_or("(unsaved)");
-        let info = format!(
-            "{} · {} rows × {} cols",
-            path,
-            app.sheet.row_count(),
-            app.sheet.col_count()
-        );
-        text(info).size(11.0).color(theme.muted_foreground).into()
+        iced_row![
+            text(format!("{path} · {} rows", app.sheet.row_count()))
+                .size(11.0)
+                .color(theme.muted_foreground),
+            icon_colored(IconKind::Close, 10.0, theme.muted_foreground),
+            text(format!("{} cols", app.sheet.col_count()))
+                .size(11.0)
+                .color(theme.muted_foreground),
+        ]
+        .spacing(4)
+        .align_y(Vertical::Center)
+        .into()
     };
 
     Sidebar::new()
@@ -156,17 +163,22 @@ fn sort_section(app: &TableApp) -> Element<'_, Message> {
 
     let mut controls = iced_row![].spacing(4);
     if let Some(ref s) = app.sheet.sort {
-        let label = match s.direction {
-            SortDirection::Ascending => "▲ Asc",
-            SortDirection::Descending => "▼ Desc",
+        let (kind, label_text) = match s.direction {
+            SortDirection::Ascending => (IconKind::ArrowUp, "Asc"),
+            SortDirection::Descending => (IconKind::ArrowDown, "Desc"),
         };
-        controls = controls.push(button_ex(
+        let label_row = iced_row![
+            icon(theme, kind, 12.0),
+            text(label_text).size(13.0).color(theme.foreground),
+        ]
+        .spacing(6)
+        .align_y(Vertical::Center);
+        controls = controls.push(icon_button(
             theme,
-            label,
+            label_row,
             Variant::Outline,
             Size::Sm,
             Some(Message::ToggleSortDirection),
-            false,
             false,
         ));
         controls = controls.push(button_ex(
