@@ -117,6 +117,21 @@ pub enum Message {
     PasteRow(usize),
     DeleteRow(usize),
 
+    // Cell context actions
+    CutCell(usize, usize),
+    CopyCell(usize, usize),
+    PasteCell(usize, usize),
+    ClearCell(usize, usize),
+
+    // Row inserts at position
+    InsertRowAbove(usize),
+    InsertRowBelow(usize),
+
+    // Column ops
+    InsertColumnLeft(usize),
+    InsertColumnRight(usize),
+    DeleteColumn(usize),
+
     // Table resize (longbridge)
     TableResizeStart(usize),
     TableResizeMove(Point),
@@ -142,6 +157,7 @@ pub struct TableApp {
     pub new_col_name: String,
     pub new_col_type: ColumnType,
     pub clipboard_row: Option<Vec<CellValue>>,
+    pub clipboard_cell: Option<CellValue>,
     pub formula: FormulaEditorState,
 
     // Table resize state (longbridge ResizeHandlers)
@@ -174,6 +190,7 @@ impl TableApp {
             new_col_name: String::new(),
             new_col_type: ColumnType::Text,
             clipboard_row: None,
+            clipboard_cell: None,
             formula: FormulaEditorState::default(),
             table_resize_col: None,
             table_resize_last_x: None,
@@ -328,6 +345,162 @@ impl TableApp {
                 self.recompute_groups();
                 self.dirty = true;
                 self.row_menu_open = None;
+            }
+            Message::CopyCell(row, col) => {
+                self.commit_edit();
+                if let Some(value) = self.sheet.rows.get(row).and_then(|r| r.get(col)).cloned() {
+                    self.clipboard_cell = Some(value);
+                }
+            }
+            Message::CutCell(row, col) => {
+                if matches!(self.sheet.columns.get(col), Some(c) if c.formula.is_some() || c.col_type == ColumnType::Formula) {
+                    return Task::none();
+                }
+                self.commit_edit();
+                if let Some(value) = self.sheet.rows.get(row).and_then(|r| r.get(col)).cloned() {
+                    self.clipboard_cell = Some(value);
+                    self.sheet.set_cell(row, col, String::new());
+                    evaluate_all_formulas(&mut self.sheet);
+                    self.recompute_groups();
+                    self.dirty = true;
+                }
+            }
+            Message::PasteCell(row, col) => {
+                if matches!(self.sheet.columns.get(col), Some(c) if c.formula.is_some() || c.col_type == ColumnType::Formula) {
+                    return Task::none();
+                }
+                self.commit_edit();
+                if let Some(ref value) = self.clipboard_cell {
+                    let raw = value.edit_value();
+                    self.sheet.set_cell(row, col, raw);
+                    evaluate_all_formulas(&mut self.sheet);
+                    self.recompute_groups();
+                    self.dirty = true;
+                }
+            }
+            Message::ClearCell(row, col) => {
+                if matches!(self.sheet.columns.get(col), Some(c) if c.formula.is_some() || c.col_type == ColumnType::Formula) {
+                    return Task::none();
+                }
+                self.commit_edit();
+                if row < self.sheet.rows.len() && col < self.sheet.columns.len() {
+                    self.sheet.set_cell(row, col, String::new());
+                    evaluate_all_formulas(&mut self.sheet);
+                    self.recompute_groups();
+                    self.dirty = true;
+                }
+            }
+            Message::InsertRowAbove(row) => {
+                self.commit_edit();
+                self.sheet.insert_blank_row_at(row);
+                if let Some((er, ec)) = self.editing {
+                    if er >= row {
+                        self.editing = Some((er + 1, ec));
+                    }
+                }
+                if let Some((sr, sc)) = self.selected_cell {
+                    if sr >= row {
+                        self.selected_cell = Some((sr + 1, sc));
+                    }
+                }
+                self.recompute_groups();
+                self.dirty = true;
+            }
+            Message::InsertRowBelow(row) => {
+                self.commit_edit();
+                self.sheet.insert_blank_row_at(row + 1);
+                if let Some((er, ec)) = self.editing {
+                    if er > row {
+                        self.editing = Some((er + 1, ec));
+                    }
+                }
+                if let Some((sr, sc)) = self.selected_cell {
+                    if sr > row {
+                        self.selected_cell = Some((sr + 1, sc));
+                    }
+                }
+                self.recompute_groups();
+                self.dirty = true;
+            }
+            Message::InsertColumnLeft(col) => {
+                self.commit_edit();
+                let name = format!("Column {}", self.sheet.col_count() + 1);
+                self.sheet.insert_column_at(col, name, ColumnType::Text);
+                if let Some(ref mut s) = self.sheet.sort {
+                    if s.column >= col {
+                        s.column += 1;
+                    }
+                }
+                if let Some(g) = self.sheet.group_by {
+                    if g >= col {
+                        self.sheet.group_by = Some(g + 1);
+                    }
+                }
+                if let Some((sr, sc)) = self.selected_cell {
+                    if sc >= col {
+                        self.selected_cell = Some((sr, sc + 1));
+                    }
+                }
+                self.editing = None;
+                self.recompute_groups();
+                self.dirty = true;
+            }
+            Message::InsertColumnRight(col) => {
+                self.commit_edit();
+                let name = format!("Column {}", self.sheet.col_count() + 1);
+                let insert_at = col + 1;
+                self.sheet.insert_column_at(insert_at, name, ColumnType::Text);
+                if let Some(ref mut s) = self.sheet.sort {
+                    if s.column >= insert_at {
+                        s.column += 1;
+                    }
+                }
+                if let Some(g) = self.sheet.group_by {
+                    if g >= insert_at {
+                        self.sheet.group_by = Some(g + 1);
+                    }
+                }
+                if let Some((sr, sc)) = self.selected_cell {
+                    if sc >= insert_at {
+                        self.selected_cell = Some((sr, sc + 1));
+                    }
+                }
+                self.editing = None;
+                self.recompute_groups();
+                self.dirty = true;
+            }
+            Message::DeleteColumn(col) => {
+                if self.sheet.col_count() <= 1 {
+                    return Task::none();
+                }
+                self.commit_edit();
+                self.sheet.delete_column(col);
+                self.sheet.sort = match self.sheet.sort.take() {
+                    Some(s) if s.column == col => None,
+                    Some(mut s) => {
+                        if s.column > col {
+                            s.column -= 1;
+                        }
+                        Some(s)
+                    }
+                    None => None,
+                };
+                self.sheet.group_by = match self.sheet.group_by {
+                    Some(g) if g == col => None,
+                    Some(g) if g > col => Some(g - 1),
+                    other => other,
+                };
+                if let Some((sr, sc)) = self.selected_cell {
+                    if sc == col {
+                        self.selected_cell = None;
+                    } else if sc > col {
+                        self.selected_cell = Some((sr, sc - 1));
+                    }
+                }
+                self.editing = None;
+                sort_rows(&mut self.sheet);
+                self.recompute_groups();
+                self.dirty = true;
             }
             Message::FileOpen => {
                 self.menubar_open = None;

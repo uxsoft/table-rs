@@ -1701,7 +1701,7 @@ dependencies = [
 [[package]]
 name = "iced-longbridge"
 version = "0.1.0"
-source = "git+https://github.com/uxsoft/iced-longbridge?branch=master#e8f90a16b995243a63de2714368d7a09ca6d7dda"
+source = "git+https://github.com/uxsoft/iced-longbridge?branch=master#61ef87b86e7d92a984f4a23bc7f9eac7ed166eda"
 dependencies = [
  "chrono",
  "iced",
@@ -5220,7 +5220,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

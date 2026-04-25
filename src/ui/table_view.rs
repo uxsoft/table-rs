@@ -4,6 +4,7 @@ use iced::{Background, Border, Element, Length, Padding, Shadow};
 
 use iced_longbridge::components::button::{button_ex, Variant};
 use iced_longbridge::components::collapsible::collapsible;
+use iced_longbridge::components::context_menu::ContextMenu;
 use iced_longbridge::components::icon::IconName;
 use iced_longbridge::components::menu::{menu, Item as MenuItem};
 use iced_longbridge::components::popover::popover_dismissable;
@@ -142,6 +143,9 @@ fn build_table_options<'a>(
 fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> {
     let theme = app.theme;
     let mut cols: Vec<Column<'a, RowRef<'a>, Message>> = Vec::new();
+    let clipboard_cell_some = app.clipboard_cell.is_some();
+    let clipboard_row_some = app.clipboard_row.is_some();
+    let only_one_column = app.sheet.col_count() <= 1;
 
     for (ci, def) in app.sheet.columns.iter().enumerate() {
         let col_width = Length::Fixed(def.width);
@@ -175,6 +179,9 @@ fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> 
                 editing,
                 selected,
                 edit_value,
+                clipboard_cell_some,
+                clipboard_row_some,
+                only_one_column,
             )
         };
 
@@ -223,11 +230,16 @@ fn render_cell<'a>(
     editing: Option<(usize, usize)>,
     selected: Option<(usize, usize)>,
     edit_value: &'a str,
+    clipboard_cell_some: bool,
+    clipboard_row_some: bool,
+    only_one_column: bool,
 ) -> Element<'a, Message> {
     let t = *theme;
     let is_selected = selected == Some((row_idx, col_idx)) && editing != Some((row_idx, col_idx));
+    let is_formula = has_formula || matches!(col_type, ColumnType::Formula);
 
-    // Inline editor for the focused cell.
+    // Inline editor for the focused cell — no context menu so the text input
+    // owns its native interactions.
     if editing == Some((row_idx, col_idx)) {
         return text_input("", edit_value)
             .on_input(Message::CellEdited)
@@ -238,38 +250,135 @@ fn render_cell<'a>(
             .into();
     }
 
-    // Formula cells are read-only.
-    if has_formula || matches!(col_type, ColumnType::Formula) {
+    let child: Element<'a, Message> = if is_formula {
+        // Formula cells are read-only.
         let display = cell.display_value(currency_symbol);
-        return container(
+        container(
             text(display)
                 .size(13.0)
                 .color(t.muted_foreground),
         )
         .padding(Padding::from([0.0, 4.0]))
         .width(Length::Fill)
-        .into();
-    }
-
-    // Editable cell: transparent button wraps the text so the whole cell is clickable.
-    let display = cell.display_value(currency_symbol);
-    let label = if display.is_empty() {
-        "·".to_string()
-    } else {
-        display
-    };
-    let label_color = if label == "·" {
-        t.muted_foreground
-    } else {
-        t.foreground
-    };
-
-    button(text(label).size(13.0).color(label_color))
-        .padding(Padding::from([2.0, 6.0]))
-        .width(Length::Fill)
-        .on_press(Message::CellClicked(row_idx, col_idx))
-        .style(move |_, status| cell_button_style(&t, status, is_selected))
         .into()
+    } else {
+        let display = cell.display_value(currency_symbol);
+        let label = if display.is_empty() {
+            "·".to_string()
+        } else {
+            display
+        };
+        let label_color = if label == "·" {
+            t.muted_foreground
+        } else {
+            t.foreground
+        };
+
+        button(text(label).size(13.0).color(label_color))
+            .padding(Padding::from([2.0, 6.0]))
+            .width(Length::Fill)
+            .on_press(Message::CellClicked(row_idx, col_idx))
+            .style(move |_, status| cell_button_style(&t, status, is_selected))
+            .into()
+    };
+
+    let items = cell_context_items(
+        row_idx,
+        col_idx,
+        is_formula,
+        clipboard_cell_some,
+        clipboard_row_some,
+        only_one_column,
+    );
+    ContextMenu::new(child, items).view(theme)
+}
+
+fn cell_context_items(
+    row: usize,
+    col: usize,
+    is_formula: bool,
+    clipboard_cell_some: bool,
+    clipboard_row_some: bool,
+    only_one_column: bool,
+) -> Vec<MenuItem<Message>> {
+    let mut items: Vec<MenuItem<Message>> = Vec::new();
+
+    let mut cut = MenuItem::new("Cut", Message::CutCell(row, col))
+        .icon(IconName::Trash)
+        .shortcut("⌘X");
+    if is_formula {
+        cut = cut.disabled();
+    }
+    items.push(cut);
+
+    items.push(
+        MenuItem::new("Copy", Message::CopyCell(row, col))
+            .icon(IconName::Copy)
+            .shortcut("⌘C"),
+    );
+
+    let mut paste = MenuItem::new("Paste", Message::PasteCell(row, col))
+        .icon(IconName::Download)
+        .shortcut("⌘V");
+    if !clipboard_cell_some || is_formula {
+        paste = paste.disabled();
+    }
+    items.push(paste);
+
+    items.push(MenuItem::Separator);
+
+    let mut clear = MenuItem::new("Clear contents", Message::ClearCell(row, col))
+        .shortcut("Del");
+    if is_formula {
+        clear = clear.disabled();
+    }
+    items.push(clear);
+
+    items.push(MenuItem::Separator);
+
+    items.push(MenuItem::new(
+        "Insert row above",
+        Message::InsertRowAbove(row),
+    ));
+    items.push(MenuItem::new(
+        "Insert row below",
+        Message::InsertRowBelow(row),
+    ));
+
+    let mut paste_row = MenuItem::new("Paste row", Message::PasteRow(row))
+        .icon(IconName::Download)
+        .shortcut("⇧⌘V");
+    if !clipboard_row_some {
+        paste_row = paste_row.disabled();
+    }
+    items.push(paste_row);
+
+    items.push(
+        MenuItem::new("Delete row", Message::DeleteRow(row))
+            .icon(IconName::Trash)
+            .danger(),
+    );
+
+    items.push(MenuItem::Separator);
+
+    items.push(MenuItem::new(
+        "Insert column left",
+        Message::InsertColumnLeft(col),
+    ));
+    items.push(MenuItem::new(
+        "Insert column right",
+        Message::InsertColumnRight(col),
+    ));
+
+    let mut delete_col = MenuItem::new("Delete column", Message::DeleteColumn(col))
+        .icon(IconName::Trash)
+        .danger();
+    if only_one_column {
+        delete_col = delete_col.disabled();
+    }
+    items.push(delete_col);
+
+    items
 }
 
 fn render_row_menu<'a>(

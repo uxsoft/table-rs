@@ -234,9 +234,53 @@ impl Sheet {
         }
     }
 
-    pub fn insert_row_after(&mut self, index: usize, row: Vec<CellValue>) {
-        let insert_at = (index + 1).min(self.rows.len());
+    pub fn insert_row_at(&mut self, index: usize, row: Vec<CellValue>) {
+        let insert_at = index.min(self.rows.len());
         self.rows.insert(insert_at, row);
+    }
+
+    pub fn insert_blank_row_at(&mut self, index: usize) {
+        let row = self.columns.iter().map(|_| CellValue::Empty).collect();
+        self.insert_row_at(index, row);
+    }
+
+    pub fn insert_row_after(&mut self, index: usize, row: Vec<CellValue>) {
+        self.insert_row_at(index + 1, row);
+    }
+
+    pub fn insert_column_at(&mut self, index: usize, name: String, col_type: ColumnType) {
+        let width = match &col_type {
+            ColumnType::Text => 150.0,
+            ColumnType::Number => 100.0,
+            ColumnType::Currency(_) => 120.0,
+            ColumnType::Formula => 120.0,
+        };
+        let insert_at = index.min(self.columns.len());
+        self.columns.insert(
+            insert_at,
+            ColumnDef {
+                name,
+                col_type,
+                width,
+                formula: None,
+            },
+        );
+        for row in &mut self.rows {
+            let row_at = insert_at.min(row.len());
+            row.insert(row_at, CellValue::Empty);
+        }
+    }
+
+    pub fn delete_column(&mut self, index: usize) {
+        if index >= self.columns.len() || self.columns.len() <= 1 {
+            return;
+        }
+        self.columns.remove(index);
+        for row in &mut self.rows {
+            if index < row.len() {
+                row.remove(index);
+            }
+        }
     }
 }
 

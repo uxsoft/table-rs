@@ -3,7 +3,7 @@ use iced::{Element, Length};
 use iced_longbridge::components::button::{button_ex, Variant};
 use iced_longbridge::components::input::input_sized;
 use iced_longbridge::components::select::select_sized;
-use iced_longbridge::components::sidebar::{sidebar, Group};
+use iced_longbridge::components::sidebar::{Group, Sidebar};
 use iced_longbridge::theme::Size;
 
 use crate::data::{ColumnType, SortDirection};
@@ -54,18 +54,15 @@ pub fn view(app: &TableApp) -> Element<'_, Message> {
         text(info).size(11.0).color(theme.muted_foreground).into()
     };
 
-    sidebar(
-        theme,
-        Some(header),
-        vec![
-            columns_group,
-            add_col_group,
-            sort_group,
-            group_group,
-        ],
-        Some(footer),
-        280.0,
-    )
+    Sidebar::new()
+        .header(header)
+        .push(columns_group)
+        .push(add_col_group)
+        .push(sort_group)
+        .push(group_group)
+        .footer(footer)
+        .width(280.0)
+        .view(theme)
 }
 
 fn columns_section(app: &TableApp) -> Element<'_, Message> {
