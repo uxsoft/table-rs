@@ -15,6 +15,7 @@ use iced::widget::{button, svg};
 use iced::{Color, ContentFit, Element, Length, Padding};
 
 use iced_longbridge::components::button::Variant;
+use iced_longbridge::components::icon::Icon as LbIcon;
 use iced_longbridge::styles;
 use iced_longbridge::theme::{with_alpha, AppTheme, Size};
 
@@ -91,6 +92,15 @@ impl IconKind {
             .get(&self)
             .cloned()
             .expect("every IconKind variant is in the cache")
+    }
+}
+
+/// Lets `IconKind` flow into iced-longbridge builders that accept
+/// `impl Into<Icon>` (menu items, etc.) and reuses the cached handle so we
+/// don't reparse the SVG per render.
+impl From<IconKind> for LbIcon {
+    fn from(kind: IconKind) -> Self {
+        LbIcon::from_svg_handle(kind.handle())
     }
 }
 

@@ -305,15 +305,23 @@ fn cell_context_items(
 ) -> Vec<MenuItem<Message>> {
     let mut items: Vec<MenuItem<Message>> = Vec::new();
 
-    let mut cut = MenuItem::new("Cut", Message::CutCell(row, col)).shortcut("⌘X");
+    let mut cut = MenuItem::new("Cut", Message::CutCell(row, col))
+        .icon(IconKind::Trash)
+        .shortcut("⌘X");
     if is_formula {
         cut = cut.disabled();
     }
     items.push(cut);
 
-    items.push(MenuItem::new("Copy", Message::CopyCell(row, col)).shortcut("⌘C"));
+    items.push(
+        MenuItem::new("Copy", Message::CopyCell(row, col))
+            .icon(IconKind::Copy)
+            .shortcut("⌘C"),
+    );
 
-    let mut paste = MenuItem::new("Paste", Message::PasteCell(row, col)).shortcut("⌘V");
+    let mut paste = MenuItem::new("Paste", Message::PasteCell(row, col))
+        .icon(IconKind::Paste)
+        .shortcut("⌘V");
     if !clipboard_cell_some || is_formula {
         paste = paste.disabled();
     }
@@ -339,13 +347,19 @@ fn cell_context_items(
         Message::InsertRowBelow(row),
     ));
 
-    let mut paste_row = MenuItem::new("Paste row", Message::PasteRow(row)).shortcut("⇧⌘V");
+    let mut paste_row = MenuItem::new("Paste row", Message::PasteRow(row))
+        .icon(IconKind::Paste)
+        .shortcut("⇧⌘V");
     if !clipboard_row_some {
         paste_row = paste_row.disabled();
     }
     items.push(paste_row);
 
-    items.push(MenuItem::new("Delete row", Message::DeleteRow(row)).danger());
+    items.push(
+        MenuItem::new("Delete row", Message::DeleteRow(row))
+            .icon(IconKind::Trash)
+            .danger(),
+    );
 
     items.push(MenuItem::Separator);
 
@@ -358,7 +372,9 @@ fn cell_context_items(
         Message::InsertColumnRight(col),
     ));
 
-    let mut delete_col = MenuItem::new("Delete column", Message::DeleteColumn(col)).danger();
+    let mut delete_col = MenuItem::new("Delete column", Message::DeleteColumn(col))
+        .icon(IconKind::Trash)
+        .danger();
     if only_one_column {
         delete_col = delete_col.disabled();
     }
@@ -393,16 +409,26 @@ fn render_row_menu<'a>(
 
     let panel = is_open.then(|| {
         let mut items: Vec<MenuItem<Message>> = vec![
-            MenuItem::new("Cut", Message::CutRow(row_idx)).shortcut("⌘X"),
-            MenuItem::new("Copy", Message::CopyRow(row_idx)).shortcut("⌘C"),
+            MenuItem::new("Cut", Message::CutRow(row_idx))
+                .icon(IconKind::Trash)
+                .shortcut("⌘X"),
+            MenuItem::new("Copy", Message::CopyRow(row_idx))
+                .icon(IconKind::Copy)
+                .shortcut("⌘C"),
         ];
-        let mut paste = MenuItem::new("Paste", Message::PasteRow(row_idx)).shortcut("⌘V");
+        let mut paste = MenuItem::new("Paste", Message::PasteRow(row_idx))
+            .icon(IconKind::Paste)
+            .shortcut("⌘V");
         if !clipboard_has_value {
             paste = paste.disabled();
         }
         items.push(paste);
         items.push(MenuItem::Separator);
-        items.push(MenuItem::new("Delete row", Message::DeleteRow(row_idx)).danger());
+        items.push(
+            MenuItem::new("Delete row", Message::DeleteRow(row_idx))
+                .icon(IconKind::Trash)
+                .danger(),
+        );
         menu(theme, items)
     });
 

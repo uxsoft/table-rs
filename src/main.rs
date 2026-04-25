@@ -866,8 +866,12 @@ impl TableApp {
         );
 
         let mut file_items = vec![
-            Item::new("Open", Message::FileOpen).shortcut("Ctrl+O"),
-            Item::new("Save", Message::FileSave).shortcut("Ctrl+S"),
+            Item::new("Open", Message::FileOpen)
+                .icon(IconKind::FolderOpen)
+                .shortcut("Ctrl+O"),
+            Item::new("Save", Message::FileSave)
+                .icon(IconKind::Save)
+                .shortcut("Ctrl+S"),
         ];
         if !self.recent_files.is_empty() {
             file_items.push(Item::Separator);
