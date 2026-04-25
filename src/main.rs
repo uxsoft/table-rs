@@ -1,6 +1,9 @@
+mod app;
 mod data;
 mod ui;
 
+use app::formula_state::FormulaEditorState;
+use app::notifications::NotificationManager;
 use data::formula::evaluate_all_formulas;
 use data::operations::{group_rows, sort_rows};
 use data::{CellValue, ColumnType, Group, Sheet, SortConfig, SortDirection};
@@ -15,9 +18,7 @@ use iced_longbridge::components::button::{button_ex, Variant};
 use iced_longbridge::components::icon::IconName;
 use iced_longbridge::components::menu::Item;
 use iced_longbridge::components::menu_bar::{menu_bar, MenuBarMenu};
-use iced_longbridge::components::notification::{
-    notification_layer, Notification, NotificationKind, NotificationList,
-};
+use iced_longbridge::components::notification::{notification_layer, NotificationKind};
 use iced_longbridge::theme::{AppTheme, Appearance, Size};
 
 const INTER_FONT: &[u8] = include_bytes!("../assets/fonts/Inter-Regular.ttf");
@@ -44,70 +45,6 @@ pub fn sort_key_for(col: usize) -> Option<&'static str> {
 
 pub fn col_for_sort_key(key: &str) -> Option<usize> {
     key.strip_prefix("col_").and_then(|s| s.parse().ok())
-}
-
-fn handle_key_event(
-    event: iced::event::Event,
-    status: iced::event::Status,
-    _window: iced::window::Id,
-) -> Option<Message> {
-    use iced::keyboard::{key::Named, Event as KbEvent, Key};
-
-    let (key, modifiers) = match event {
-        iced::event::Event::Keyboard(KbEvent::KeyPressed {
-            key, modifiers, ..
-        }) => (key, modifiers),
-        _ => return None,
-    };
-
-    // App-level accelerators fire regardless of widget focus.
-    if modifiers.command() {
-        if let Key::Character(ref s) = key {
-            match s.as_str() {
-                "s" | "S" => return Some(Message::FileSave),
-                "o" | "O" => return Some(Message::FileOpen),
-                _ => {}
-            }
-        }
-    }
-
-    // Keys that arrive while a text input has focus (Status::Captured) —
-    // the formula editor's autocomplete consumes Up/Down/Tab/Escape here,
-    // bypassing the focused-widget gate below. The `update` arms are
-    // no-ops when the formula editor isn't actually open.
-    if matches!(status, iced::event::Status::Captured) {
-        match key {
-            Key::Named(Named::ArrowUp) => {
-                return Some(Message::FormulaSuggestionMove(-1))
-            }
-            Key::Named(Named::ArrowDown) => {
-                return Some(Message::FormulaSuggestionMove(1))
-            }
-            Key::Named(Named::Escape) => return Some(Message::FormulaEscape),
-            _ => {}
-        }
-    }
-
-    // Tab is not claimed by iced's text_input, so its status is Ignored.
-    if let Key::Named(Named::Tab) = key {
-        return Some(Message::FormulaSuggestionAccept);
-    }
-
-    // Navigation and cell-edit keys defer to focused widgets.
-    if !matches!(status, iced::event::Status::Ignored) {
-        return None;
-    }
-
-    match key {
-        Key::Named(Named::ArrowUp) => Some(Message::CellMove(-1, 0)),
-        Key::Named(Named::ArrowDown) => Some(Message::CellMove(1, 0)),
-        Key::Named(Named::ArrowLeft) => Some(Message::CellMove(0, -1)),
-        Key::Named(Named::ArrowRight) => Some(Message::CellMove(0, 1)),
-        Key::Named(Named::Enter) | Key::Named(Named::F2) => Some(Message::CellEditBegin),
-        Key::Named(Named::Delete) | Key::Named(Named::Backspace) => Some(Message::CellClear),
-        Key::Named(Named::Escape) => Some(Message::CellEditCancel),
-        _ => None,
-    }
 }
 
 fn main() -> iced::Result {
@@ -205,13 +142,7 @@ pub struct TableApp {
     pub new_col_name: String,
     pub new_col_type: ColumnType,
     pub clipboard_row: Option<Vec<CellValue>>,
-    pub editing_formula_col: Option<usize>,
-    pub editing_formula_value: String,
-    pub formula_suggestions_selected: usize,
-    pub formula_autocomplete_suppressed: bool,
-    pub formula_last_edit: Option<std::time::Instant>,
-    pub formula_error: Option<String>,
-    pub formula_error_checked_for: Option<String>,
+    pub formula: FormulaEditorState,
 
     // Table resize state (longbridge ResizeHandlers)
     pub table_resize_col: Option<usize>,
@@ -223,8 +154,7 @@ pub struct TableApp {
 
     // Theme + notifications
     pub theme: AppTheme,
-    pub notifications: NotificationList,
-    next_notification_id: u64,
+    pub notifications: NotificationManager,
 
     // Unsaved-changes tracker
     pub dirty: bool,
@@ -244,20 +174,13 @@ impl TableApp {
             new_col_name: String::new(),
             new_col_type: ColumnType::Text,
             clipboard_row: None,
-            editing_formula_col: None,
-            editing_formula_value: String::new(),
-            formula_suggestions_selected: 0,
-            formula_autocomplete_suppressed: false,
-            formula_last_edit: None,
-            formula_error: None,
-            formula_error_checked_for: None,
+            formula: FormulaEditorState::default(),
             table_resize_col: None,
             table_resize_last_x: None,
             row_menu_open: None,
             menubar_open: None,
             theme: AppTheme::dark(),
-            notifications: NotificationList::new(),
-            next_notification_id: 1,
+            notifications: NotificationManager::new(),
             dirty: false,
             recent_files: data::recent::load(),
         };
@@ -285,34 +208,12 @@ impl TableApp {
     fn subscription(&self) -> Subscription<Message> {
         let tick = iced::time::every(std::time::Duration::from_millis(250))
             .map(|_| Message::NotifyTick);
-        let keys = iced::event::listen_with(handle_key_event);
+        let keys = iced::event::listen_with(app::keyboard::handle_key_event);
         Subscription::batch(vec![tick, keys])
     }
 
     pub fn recompute_groups(&mut self) {
         self.groups = group_rows(&self.sheet);
-    }
-
-    fn notify(&mut self, kind: NotificationKind, title: impl Into<String>) {
-        let id = self.next_notification_id;
-        self.next_notification_id += 1;
-        self.notifications
-            .push(Notification::new(id, kind, title).ttl_ms(3_500));
-    }
-
-    fn notify_msg(
-        &mut self,
-        kind: NotificationKind,
-        title: impl Into<String>,
-        msg: impl Into<String>,
-    ) {
-        let id = self.next_notification_id;
-        self.next_notification_id += 1;
-        self.notifications.push(
-            Notification::new(id, kind, title)
-                .message(msg)
-                .ttl_ms(5_000),
-        );
     }
 
     fn commit_edit(&mut self) {
@@ -342,7 +243,7 @@ impl TableApp {
             Message::NotifyTick => {
                 self.notifications
                     .tick(std::time::Duration::from_millis(250));
-                self.maybe_check_formula_error();
+                self.formula.maybe_check_error(&self.sheet);
             }
             Message::NotifyDismiss(id) => {
                 self.notifications.dismiss(id);
@@ -479,11 +380,13 @@ impl TableApp {
                         .and_then(|s| s.to_str())
                         .unwrap_or("file")
                         .to_string();
-                    self.notify_msg(NotificationKind::Success, "Loaded", name);
+                    self.notifications
+                        .notify_msg(NotificationKind::Success, "Loaded", name);
                 }
                 Err(e) if e == "Cancelled" => {}
                 Err(e) => {
-                    self.notify_msg(NotificationKind::Error, "Load failed", e);
+                    self.notifications
+                        .notify_msg(NotificationKind::Error, "Load failed", e);
                 }
             },
             Message::FileSave => {
@@ -520,11 +423,12 @@ impl TableApp {
                     if let Some(path) = self.sheet.file_path.clone() {
                         self.remember_recent(&path);
                     }
-                    self.notify(NotificationKind::Success, "Saved");
+                    self.notifications.notify(NotificationKind::Success, "Saved");
                 }
                 Err(e) if e == "Cancelled" => {}
                 Err(e) => {
-                    self.notify_msg(NotificationKind::Error, "Save failed", e);
+                    self.notifications
+                        .notify_msg(NotificationKind::Error, "Save failed", e);
                 }
             },
             Message::CellClicked(row, col) => {
@@ -605,7 +509,7 @@ impl TableApp {
                         self.sheet.columns.get(col),
                         Some(c) if c.col_type == ColumnType::Formula
                     ) {
-                        self.open_formula_editor(col);
+                        self.formula.open(col, &self.sheet);
                         return Task::none();
                     }
                     self.dirty = true;
@@ -668,75 +572,41 @@ impl TableApp {
                 self.new_col_name.clear();
                 if is_formula {
                     let new_col = self.sheet.columns.len() - 1;
-                    self.open_formula_editor(new_col);
+                    self.formula.open(new_col, &self.sheet);
                 }
                 self.recompute_groups();
                 self.dirty = true;
             }
             Message::FormulaOpenEditor(col) => {
-                self.open_formula_editor(col);
+                self.formula.open(col, &self.sheet);
             }
             Message::FormulaChanged(value) => {
-                let prev_names = self.suggestion_names();
-                self.editing_formula_value = value;
-                self.formula_autocomplete_suppressed = false;
-                let new_names = self.suggestion_names();
-                if new_names != prev_names {
-                    self.formula_suggestions_selected = 0;
-                }
-                self.formula_last_edit = Some(std::time::Instant::now());
+                self.formula.handle_changed(value, &self.sheet);
             }
             Message::FormulaEditCommit => {
-                // Enter with suggestions visible accepts the highlighted one
-                // instead of committing the formula.
-                if !self.formula_suggestions().is_empty() {
-                    self.apply_formula_suggestion(self.formula_suggestions_selected);
+                let result = self.formula.handle_commit(&mut self.sheet);
+                if result.accepted_suggestion {
                     return Task::none();
                 }
-                if let Some(col) = self.editing_formula_col {
-                    let expr = self.editing_formula_value.trim().to_string();
-                    if col < self.sheet.columns.len() {
-                        let new_formula = if expr.is_empty() { None } else { Some(expr) };
-                        if self.sheet.columns[col].formula != new_formula {
-                            self.dirty = true;
-                        }
-                        self.sheet.columns[col].formula = new_formula;
-                        evaluate_all_formulas(&mut self.sheet);
-                        self.recompute_groups();
-                    }
+                if result.formula_changed {
+                    self.dirty = true;
                 }
-                self.close_formula_editor();
+                self.recompute_groups();
             }
             Message::FormulaEditCancel => {
-                self.close_formula_editor();
+                self.formula.close();
             }
             Message::FormulaSuggestionMove(delta) => {
-                let suggestions = self.formula_suggestions();
-                if suggestions.is_empty() {
-                    return Task::none();
-                }
-                let len = suggestions.len() as i32;
-                let cur = self.formula_suggestions_selected as i32;
-                let next = (cur + delta).clamp(0, len - 1) as usize;
-                self.formula_suggestions_selected = next;
+                self.formula.handle_suggestion_move(delta, &self.sheet);
             }
             Message::FormulaSuggestionAccept => {
-                if self.formula_suggestions().is_empty() {
-                    return Task::none();
-                }
-                self.apply_formula_suggestion(self.formula_suggestions_selected);
+                self.formula.handle_suggestion_accept(&self.sheet);
             }
             Message::FormulaSuggestionClick(idx) => {
-                if self.formula_suggestions().is_empty() {
-                    return Task::none();
-                }
-                self.apply_formula_suggestion(idx);
+                self.formula.handle_suggestion_click(&self.sheet, idx);
             }
             Message::FormulaEscape => {
-                if !self.formula_suggestions().is_empty() {
-                    self.formula_autocomplete_suppressed = true;
-                    self.formula_suggestions_selected = 0;
-                }
+                self.formula.handle_escape(&self.sheet);
             }
             Message::SortColumn(col) => {
                 self.sheet.sort = col.map(|c| SortConfig {
@@ -803,103 +673,6 @@ impl TableApp {
         std::thread::spawn(move || {
             let _ = data::recent::save(&snapshot);
         });
-    }
-
-    fn open_formula_editor(&mut self, col: usize) {
-        if col < self.sheet.columns.len() {
-            let current = self.sheet.columns[col].formula.clone().unwrap_or_default();
-            self.editing_formula_col = Some(col);
-            self.editing_formula_value = current;
-            self.formula_suggestions_selected = 0;
-            self.formula_autocomplete_suppressed = false;
-            self.formula_last_edit = Some(std::time::Instant::now());
-            self.formula_error = None;
-            self.formula_error_checked_for = None;
-        }
-    }
-
-    fn close_formula_editor(&mut self) {
-        self.editing_formula_col = None;
-        self.editing_formula_value.clear();
-        self.formula_suggestions_selected = 0;
-        self.formula_autocomplete_suppressed = false;
-        self.formula_last_edit = None;
-        self.formula_error = None;
-        self.formula_error_checked_for = None;
-    }
-
-    /// Current autocomplete suggestions. Returns `(column_index, name)` pairs.
-    /// Empty when the popover should not show.
-    pub fn formula_suggestions(&self) -> Vec<(usize, String)> {
-        if self.editing_formula_col.is_none() || self.formula_autocomplete_suppressed {
-            return Vec::new();
-        }
-        let Some((_, partial)) =
-            data::formula::last_open_brace_partial(&self.editing_formula_value)
-        else {
-            return Vec::new();
-        };
-        let names: Vec<&str> = self.sheet.columns.iter().map(|c| c.name.as_str()).collect();
-        data::formula::match_suggestions(&names, partial, self.editing_formula_col)
-            .into_iter()
-            .map(|(i, n)| (i, n.to_string()))
-            .collect()
-    }
-
-    fn suggestion_names(&self) -> Vec<String> {
-        self.formula_suggestions()
-            .into_iter()
-            .map(|(_, n)| n)
-            .collect()
-    }
-
-    /// Debounced re-evaluation of the in-progress formula. Driven by the
-    /// existing `NotifyTick` subscription; runs at most once per settled
-    /// edit (tracked via `formula_error_checked_for`). Evaluates against
-    /// row 0 to surface structural errors like unknown column names.
-    fn maybe_check_formula_error(&mut self) {
-        if self.editing_formula_col.is_none() {
-            return;
-        }
-        let Some(last_edit) = self.formula_last_edit else {
-            return;
-        };
-        if last_edit.elapsed() < std::time::Duration::from_millis(300) {
-            return;
-        }
-        if self.formula_error_checked_for.as_deref() == Some(self.editing_formula_value.as_str())
-        {
-            return;
-        }
-        let value = self.editing_formula_value.clone();
-        let trimmed = value.trim();
-        if trimmed.is_empty() || self.sheet.rows.is_empty() {
-            self.formula_error = None;
-        } else {
-            match data::formula::evaluate_column_formula(&self.sheet, trimmed, 0) {
-                Ok(_) => self.formula_error = None,
-                Err(msg) => self.formula_error = Some(msg),
-            }
-        }
-        self.formula_error_checked_for = Some(value);
-    }
-
-    fn apply_formula_suggestion(&mut self, idx_in_suggestions: usize) {
-        let suggestions = self.formula_suggestions();
-        if suggestions.is_empty() {
-            return;
-        }
-        let idx = idx_in_suggestions.min(suggestions.len() - 1);
-        let name = suggestions[idx].1.clone();
-        if let Some((brace_idx, _)) =
-            data::formula::last_open_brace_partial(&self.editing_formula_value)
-        {
-            self.editing_formula_value =
-                data::formula::apply_suggestion(&self.editing_formula_value, brace_idx, &name);
-            self.formula_suggestions_selected = 0;
-            self.formula_autocomplete_suppressed = false;
-            self.formula_last_edit = Some(std::time::Instant::now());
-        }
     }
 
     fn view(&self) -> Element<'_, Message> {
@@ -979,6 +752,6 @@ impl TableApp {
             .height(Length::Fill)
             .into();
 
-        notification_layer(theme, base, &self.notifications, Message::NotifyDismiss)
+        notification_layer(theme, base, &self.notifications.list, Message::NotifyDismiss)
     }
 }

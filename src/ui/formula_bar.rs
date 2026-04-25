@@ -20,7 +20,7 @@ Examples\n\
     ({Value} + 10) / 2";
 
 pub fn view(app: &TableApp) -> Option<Element<'_, Message>> {
-    let col = app.editing_formula_col?;
+    let col = app.formula.editing_col?;
     let theme = &app.theme;
     let t = *theme;
 
@@ -48,17 +48,17 @@ pub fn view(app: &TableApp) -> Option<Element<'_, Message>> {
         .width(Length::Fixed(120.0));
 
     let input: Element<'_, Message> =
-        input_sized(theme, Size::Sm, "= expression…", &app.editing_formula_value)
+        input_sized(theme, Size::Sm, "= expression…", &app.formula.value)
             .on_input(Message::FormulaChanged)
             .on_submit(Message::FormulaEditCommit)
             .width(Length::Fill)
             .into();
 
-    let suggestions = app.formula_suggestions();
+    let suggestions = app.formula.suggestions(&app.sheet);
     let suggestion_panel: Option<Element<'_, Message>> = if suggestions.is_empty() {
         None
     } else {
-        let selected = app.formula_suggestions_selected.min(suggestions.len() - 1);
+        let selected = app.formula.suggestions_selected.min(suggestions.len() - 1);
         let rows: Vec<Element<'_, Message>> = suggestions
             .iter()
             .enumerate()
@@ -90,7 +90,7 @@ pub fn view(app: &TableApp) -> Option<Element<'_, Message>> {
     let input_with_popover =
         popover_dismissable(theme, input, suggestion_panel, Message::FormulaEscape);
 
-    let error_slot: Element<'_, Message> = if let Some(err) = &app.formula_error {
+    let error_slot: Element<'_, Message> = if let Some(err) = &app.formula.error {
         let dot: Element<'_, Message> = container(text(""))
             .width(Length::Fixed(8.0))
             .height(Length::Fixed(8.0))
