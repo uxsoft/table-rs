@@ -1702,7 +1702,7 @@ dependencies = [
 [[package]]
 name = "iced-longbridge"
 version = "0.1.0"
-source = "git+https://github.com/uxsoft/iced-longbridge?branch=master#e8d9562ed5566699c60bfaa5f39b5ee8dd5638bd"
+source = "git+https://github.com/uxsoft/iced-longbridge?branch=master#48513725843c47b2d0029b9baee0764a81a57aa5"
 dependencies = [
  "chrono",
  "iced",

@@ -108,6 +108,7 @@ pub enum Message {
     // Sort
     TableSort(&'static str),
     SortColumn(Option<usize>),
+    SortColumnDir(usize, SortDirection),
     ToggleSortDirection,
 
     // Group
@@ -117,6 +118,7 @@ pub enum Message {
     // Row context actions
     RowMenuToggle(Option<usize>),
     ColumnSettingsToggle(Option<usize>),
+    ColumnDeleteConfirmToggle(bool),
     CutRow(usize),
     CopyRow(usize),
     PasteRow(usize),
@@ -167,6 +169,7 @@ pub struct TableApp {
     // Transient UI state
     pub row_menu_open: Option<usize>,
     pub column_settings_open: Option<usize>,
+    pub column_delete_confirm: bool,
     pub menubar_open: Option<usize>,
 
     // Theme + notifications
@@ -196,6 +199,7 @@ impl TableApp {
             table_resize: ResizeState::new(widths).min_width(60.0).max_width(800.0),
             row_menu_open: None,
             column_settings_open: None,
+            column_delete_confirm: false,
             menubar_open: None,
             theme: AppTheme::dark(),
             notifications: NotificationManager::new(),
@@ -305,6 +309,7 @@ impl TableApp {
                     (Some(cur), Some(c)) if cur == c => None,
                     _ => col,
                 };
+                self.column_delete_confirm = false;
                 match self.column_settings_open {
                     Some(c) if matches!(
                         self.sheet.columns.get(c).map(|d| &d.col_type),
@@ -321,6 +326,9 @@ impl TableApp {
                         }
                     }
                 }
+            }
+            Message::ColumnDeleteConfirmToggle(open) => {
+                self.column_delete_confirm = open;
             }
             Message::TableResize(event) => {
                 let was_release = matches!(event, ResizeEvent::Release);
@@ -523,6 +531,11 @@ impl TableApp {
                     }
                 }
                 self.editing = None;
+                self.column_settings_open = None;
+                self.column_delete_confirm = false;
+                if self.formula.editing_col.is_some() {
+                    self.formula.close();
+                }
                 sort_rows(&mut self.sheet);
                 self.recompute_groups();
                 self.rebuild_resize_state();
@@ -836,6 +849,15 @@ impl TableApp {
                 self.sheet.sort = col.map(|c| SortConfig {
                     column: c,
                     direction: SortDirection::Ascending,
+                });
+                sort_rows(&mut self.sheet);
+                self.recompute_groups();
+                self.dirty = true;
+            }
+            Message::SortColumnDir(col, direction) => {
+                self.sheet.sort = Some(SortConfig {
+                    column: col,
+                    direction,
                 });
                 sort_rows(&mut self.sheet);
                 self.recompute_groups();

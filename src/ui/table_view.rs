@@ -43,7 +43,7 @@ pub fn view(app: &TableApp) -> Element<'_, Message> {
         false,
     );
 
-    let add_row_container = container(add_row_btn)
+    let add_row_container = container(iced_row![add_row_btn].spacing(8).align_y(Vertical::Center))
         .padding(Padding::from([6.0, 12.0]))
         .width(Length::Fill);
 
@@ -157,27 +157,21 @@ fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> 
             ColumnType::Currency(sym) => sym.clone(),
             _ => "$".to_string(),
         };
-        let format = def.format.clone();
-        let t = theme;
-        let editing = app.editing;
-        let selected = app.selected_cell;
-        let edit_value = app.edit_value.as_str();
-
         let render = move |rr: &RowRef<'a>| -> Element<'a, Message> {
             let (row_idx, cells) = *rr;
             let cell = cells.get(ci).cloned().unwrap_or(CellValue::Empty);
             render_cell(
-                &t,
+                &theme,
                 row_idx,
                 ci,
                 &cell,
                 &col_type,
                 has_formula,
                 &currency_symbol,
-                &format,
-                editing,
-                selected,
-                edit_value,
+                &def.format.clone(),
+                app.editing,
+                app.selected_cell,
+                app.edit_value.as_str(),
                 clipboard_cell_some,
                 clipboard_row_some,
                 only_one_column,
@@ -199,10 +193,9 @@ fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> 
             }
         }
 
-        c = c.header_button(
-            IconKind::Settings,
-            Message::ColumnSettingsToggle(Some(ci)),
-        );
+        c = c
+            .header_button(IconKind::Settings, Message::ColumnSettingsToggle(Some(ci)))
+            .header_button_tooltip("Column settings");
         if app.column_settings_open == Some(ci) {
             c = c.header_panel(build_column_settings_panel(app, ci));
         }
@@ -215,9 +208,10 @@ fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> 
     let add_col = Column::new("", move |_rr: &RowRef<'a>| -> Element<'a, Message> {
         Space::new().width(Length::Fill).into()
     })
-    .width(Length::Fixed(36.0))
+    // .width(Length::Fixed(36.0))
     .align(Horizontal::Center)
-    .header_button(IconKind::Plus, Message::AddColumn(ColumnType::Text));
+    .header_button(IconKind::Plus, Message::AddColumn(ColumnType::Text))
+    .header_button_tooltip("Add column");
     cols.push(add_col);
 
     // Trailing kebab (row menu) column.
@@ -267,15 +261,17 @@ fn precision_options() -> Vec<String> {
     (0..=6u8).map(|n| n.to_string()).collect()
 }
 
-fn build_column_settings_panel<'a>(
-    app: &'a TableApp,
-    ci: usize,
-) -> Element<'a, Message> {
+fn build_column_settings_panel<'a>(app: &'a TableApp, ci: usize) -> Element<'a, Message> {
     let theme = &app.theme;
     let t = *theme;
     let def = match app.sheet.columns.get(ci) {
         Some(d) => d,
-        None => return Space::new().width(Length::Shrink).height(Length::Shrink).into(),
+        None => {
+            return Space::new()
+                .width(Length::Shrink)
+                .height(Length::Shrink)
+                .into()
+        }
     };
 
     let panel_width = Length::Fixed(280.0);
@@ -325,6 +321,13 @@ fn build_column_settings_panel<'a>(
     .spacing(4)
     .width(panel_width);
 
+    col = col.push(Space::new().height(Length::Fixed(4.0)));
+    col = col.push(section_label("Sort"));
+    col = col.push(build_sort_controls(app, ci));
+
+    col = col.push(Space::new().height(Length::Fixed(4.0)));
+    col = col.push(build_group_switch(app, ci));
+
     // Number / Currency formatting.
     let is_numeric = matches!(def.col_type, ColumnType::Number | ColumnType::Currency(_));
     if is_numeric {
@@ -346,10 +349,13 @@ fn build_column_settings_panel<'a>(
         col = col.push(section_label("Decimals"));
         col = col.push(precision_select);
 
-        let thousands_switch =
-            switch(theme, def.format.thousands, Some("Thousands separator".into()))
-                .on_toggle(move |_| Message::ColumnThousandsToggled(ci))
-                .text_size(13.0);
+        let thousands_switch = switch(
+            theme,
+            def.format.thousands,
+            Some("Thousands separator".into()),
+        )
+        .on_toggle(move |_| Message::ColumnThousandsToggled(ci))
+        .text_size(13.0);
 
         col = col.push(Space::new().height(Length::Fixed(4.0)));
         col = col.push(thousands_switch);
@@ -388,46 +394,41 @@ fn build_column_settings_panel<'a>(
         } else {
             def.formula.as_deref().unwrap_or("")
         };
-        let input: Element<'a, Message> = input_sized(theme, Size::Sm, "= expression…", formula_value)
-            .on_input(Message::FormulaChanged)
-            .on_submit(Message::FormulaEditCommit)
-            .width(Length::Fill)
-            .into();
+        let input: Element<'a, Message> =
+            input_sized(theme, Size::Sm, "= expression…", formula_value)
+                .on_input(Message::FormulaChanged)
+                .on_submit(Message::FormulaEditCommit)
+                .width(Length::Fill)
+                .into();
 
         let suggestions = app.formula.suggestions(&app.sheet);
-        let suggestion_panel: Option<Element<'a, Message>> = if suggestions.is_empty()
-            || app.formula.editing_col != Some(ci)
-        {
-            None
-        } else {
-            let selected = app.formula.suggestions_selected.min(suggestions.len() - 1);
-            let rows: Vec<Element<'a, Message>> = suggestions
-                .iter()
-                .enumerate()
-                .map(|(i, (_col_idx, name))| {
-                    let variant = if i == selected {
-                        Variant::Secondary
-                    } else {
-                        Variant::Ghost
-                    };
-                    button_ex(
-                        theme,
-                        name.clone(),
-                        variant,
-                        Size::Sm,
-                        Some(Message::FormulaSuggestionClick(i)),
-                        false,
-                        false,
-                    )
-                })
-                .collect();
-            Some(
-                column(rows)
-                    .spacing(2)
-                    .width(Length::Fixed(220.0))
-                    .into(),
-            )
-        };
+        let suggestion_panel: Option<Element<'a, Message>> =
+            if suggestions.is_empty() || app.formula.editing_col != Some(ci) {
+                None
+            } else {
+                let selected = app.formula.suggestions_selected.min(suggestions.len() - 1);
+                let rows: Vec<Element<'a, Message>> = suggestions
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (_col_idx, name))| {
+                        let variant = if i == selected {
+                            Variant::Secondary
+                        } else {
+                            Variant::Ghost
+                        };
+                        button_ex(
+                            theme,
+                            name.clone(),
+                            variant,
+                            Size::Sm,
+                            Some(Message::FormulaSuggestionClick(i)),
+                            false,
+                            false,
+                        )
+                    })
+                    .collect();
+                Some(column(rows).spacing(2).width(Length::Fixed(220.0)).into())
+            };
 
         let input_with_popover =
             popover_dismissable(theme, input, suggestion_panel, Message::FormulaEscape);
@@ -491,13 +492,176 @@ fn build_column_settings_panel<'a>(
             .spacing(6)
             .align_y(Vertical::Center);
         col = col.push(actions);
-
     }
+
+    // Delete column — danger button with a confirm popover.
+    let only_one_column = app.sheet.col_count() <= 1;
+    col = col.push(Space::new().height(Length::Fixed(8.0)));
+    col = col.push(build_delete_column_control(app, ci, only_one_column));
 
     container(col)
         .padding(Padding::from(12.0))
         .width(panel_width)
         .into()
+}
+
+fn build_sort_controls<'a>(app: &'a TableApp, ci: usize) -> Element<'a, Message> {
+    let theme = &app.theme;
+    let current = app.sheet.sort.as_ref().filter(|s| s.column == ci);
+    let active_dir = current.map(|s| s.direction);
+
+    let asc_variant = if active_dir == Some(SortDirection::Ascending) {
+        Variant::Secondary
+    } else {
+        Variant::Outline
+    };
+    let desc_variant = if active_dir == Some(SortDirection::Descending) {
+        Variant::Secondary
+    } else {
+        Variant::Outline
+    };
+
+    let asc_btn = icon_button(
+        theme,
+        iced_row![
+            icon(theme, IconKind::ArrowUp, 12.0),
+            text("Asc").size(12.0).color(theme.foreground),
+        ]
+        .spacing(4)
+        .align_y(Vertical::Center),
+        asc_variant,
+        Size::Sm,
+        Some(Message::SortColumnDir(ci, SortDirection::Ascending)),
+        false,
+    );
+    let desc_btn = icon_button(
+        theme,
+        iced_row![
+            icon(theme, IconKind::ArrowDown, 12.0),
+            text("Desc").size(12.0).color(theme.foreground),
+        ]
+        .spacing(4)
+        .align_y(Vertical::Center),
+        desc_variant,
+        Size::Sm,
+        Some(Message::SortColumnDir(ci, SortDirection::Descending)),
+        false,
+    );
+
+    let mut row = iced_row![asc_btn, desc_btn].spacing(4);
+    if active_dir.is_some() {
+        row = row.push(button_ex(
+            theme,
+            "Clear",
+            Variant::Ghost,
+            Size::Sm,
+            Some(Message::SortColumn(None)),
+            false,
+            false,
+        ));
+    }
+    row.align_y(Vertical::Center).into()
+}
+
+fn build_group_switch<'a>(app: &'a TableApp, ci: usize) -> Element<'a, Message> {
+    let theme = &app.theme;
+    let active = app.sheet.group_by == Some(ci);
+    let target = if active { None } else { Some(ci) };
+    switch(theme, active, Some("Group by this column".into()))
+        .on_toggle(move |_| Message::GroupByColumn(target))
+        .text_size(13.0)
+        .into()
+}
+
+fn build_delete_column_control<'a>(
+    app: &'a TableApp,
+    ci: usize,
+    only_one_column: bool,
+) -> Element<'a, Message> {
+    let theme = &app.theme;
+    let t = *theme;
+
+    if app.column_delete_confirm && !only_one_column {
+        let col_name = app
+            .sheet
+            .columns
+            .get(ci)
+            .map(|d| d.name.as_str())
+            .unwrap_or("");
+        let warning = text(format!(
+            "Delete column \"{}\"? This cannot be undone.",
+            col_name
+        ))
+        .size(12.0)
+        .color(t.foreground);
+
+        let cancel_btn = button_ex(
+            theme,
+            "Cancel",
+            Variant::Ghost,
+            Size::Sm,
+            Some(Message::ColumnDeleteConfirmToggle(false)),
+            false,
+            false,
+        );
+        let confirm_btn = button_ex(
+            theme,
+            "Delete",
+            Variant::Danger,
+            Size::Sm,
+            Some(Message::DeleteColumn(ci)),
+            false,
+            false,
+        );
+
+        let actions = iced_row![Space::new().width(Length::Fill), cancel_btn, confirm_btn]
+            .spacing(6)
+            .align_y(Vertical::Center);
+
+        let confirm_panel = container(
+            column![warning, Space::new().height(Length::Fixed(8.0)), actions]
+                .spacing(0)
+                .width(Length::Fill),
+        )
+        .padding(Padding::from(10.0))
+        .style(move |_| container::Style {
+            background: Some(Background::Color(iced_longbridge::theme::with_alpha(
+                t.danger, 0.08,
+            ))),
+            text_color: Some(t.foreground),
+            border: Border {
+                color: t.danger,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            shadow: Shadow::default(),
+            snap: true,
+        });
+
+        return confirm_panel.into();
+    }
+
+    let trigger_label = iced_row![
+        icon_colored(IconKind::Trash, 12.0, t.danger_foreground),
+        text("Delete column").size(12.0).color(t.danger_foreground),
+    ]
+    .spacing(6)
+    .align_y(Vertical::Center);
+
+    let on_press = if only_one_column {
+        None
+    } else {
+        Some(Message::ColumnDeleteConfirmToggle(true))
+    };
+
+    icon_button(
+        theme,
+        trigger_label,
+        Variant::Danger,
+        Size::Sm,
+        on_press,
+        only_one_column,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
