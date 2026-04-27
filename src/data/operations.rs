@@ -24,13 +24,18 @@ pub fn group_rows(sheet: &Sheet) -> Option<Vec<Group>> {
     let mut group_map: std::collections::BTreeMap<String, Vec<usize>> =
         std::collections::BTreeMap::new();
 
+    let col_def = sheet.columns.get(col);
+    let sym = match col_def.map(|d| &d.col_type) {
+        Some(crate::data::ColumnType::Currency(s)) => s.as_str(),
+        _ => "",
+    };
+    let format = col_def
+        .map(|d| d.format.clone())
+        .unwrap_or_default();
     for (i, row) in sheet.rows.iter().enumerate() {
         let key = row
             .get(col)
-            .map(|c| {
-                let sym = "$";
-                c.display_value(sym)
-            })
+            .map(|c| c.display_value(sym, &format))
             .unwrap_or_default();
         let key = if key.is_empty() {
             "(empty)".to_string()

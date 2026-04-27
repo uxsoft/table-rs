@@ -1,10 +1,44 @@
 {
   "columns": [
-    { "name": "Name", "col_type": "Text", "width": 150.0 },
-    { "name": "Category", "col_type": "Text", "width": 120.0 },
-    { "name": "Quantity", "col_type": "Number", "width": 100.0 },
-    { "name": "Price", "col_type": { "Currency": "$" }, "width": 120.0 },
-    { "name": "Total", "col_type": "Formula", "width": 130.0 }
+    {
+      "name": "Name",
+      "col_type": "Text",
+      "width": 150.0,
+      "format": {
+        "precision": 2,
+        "thousands": false
+      }
+    },
+    {
+      "name": "Value",
+      "col_type": "Number",
+      "width": 100.0,
+      "format": {
+        "precision": 2,
+        "thousands": false
+      }
+    },
+    {
+      "name": "Price",
+      "col_type": {
+        "Currency": "$"
+      },
+      "width": 120.0,
+      "format": {
+        "precision": 2,
+        "thousands": false
+      }
+    },
+    {
+      "name": "Total",
+      "col_type": "Formula",
+      "width": 120.0,
+      "formula": "{Value} * {Price}",
+      "format": {
+        "precision": 2,
+        "thousands": false
+      }
+    }
   ],
   "sort": null,
   "group_by": null

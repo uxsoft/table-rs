@@ -11,13 +11,14 @@ use data::{CellValue, ColumnType, Group, Sheet, SortConfig, SortDirection};
 use iced::alignment::Vertical;
 use iced::widget::{column, container, row};
 use iced::{
-    Background, Border, Element, Font, Length, Padding, Point, Shadow, Subscription,
+    Background, Border, Element, Font, Length, Padding, Shadow, Subscription,
     Task, Theme,
 };
 use iced_longbridge::components::button::Variant;
 use iced_longbridge::components::menu::Item;
 use iced_longbridge::components::menu_bar::{menu_bar, MenuBarMenu};
 use iced_longbridge::components::notification::{notification_layer, NotificationKind};
+use iced_longbridge::components::table::{ResizeEvent, ResizeState};
 use iced_longbridge::theme::{AppTheme, Appearance, Size};
 
 use crate::ui::icons::{icon, icon_button, IconKind};
@@ -85,10 +86,12 @@ pub enum Message {
 
     // Rows & columns
     AddRow,
-    NewColNameChanged(String),
-    NewColTypeChanged(ColumnType),
     AddColumn(ColumnType),
     ColumnTypeChanged(usize, ColumnType),
+    ColumnNameChanged(usize, String),
+    ColumnPrecisionChanged(usize, u8),
+    ColumnThousandsToggled(usize),
+    ColumnCurrencySymbolChanged(usize, String),
 
     // Column formula
     FormulaOpenEditor(usize),
@@ -113,6 +116,7 @@ pub enum Message {
 
     // Row context actions
     RowMenuToggle(Option<usize>),
+    ColumnSettingsToggle(Option<usize>),
     CutRow(usize),
     CopyRow(usize),
     PasteRow(usize),
@@ -134,9 +138,7 @@ pub enum Message {
     DeleteColumn(usize),
 
     // Table resize (longbridge)
-    TableResizeStart(usize),
-    TableResizeMove(Point),
-    TableResizeEnd,
+    TableResize(ResizeEvent),
 
     // Menu bar
     MenuBarToggle(usize),
@@ -155,18 +157,16 @@ pub struct TableApp {
     pub selected_cell: Option<(usize, usize)>,
     pub edit_value: String,
     pub groups: Option<Vec<Group>>,
-    pub new_col_name: String,
-    pub new_col_type: ColumnType,
     pub clipboard_row: Option<Vec<CellValue>>,
     pub clipboard_cell: Option<CellValue>,
     pub formula: FormulaEditorState,
 
-    // Table resize state (longbridge ResizeHandlers)
-    pub table_resize_col: Option<usize>,
-    pub table_resize_last_x: Option<f32>,
+    // Table resize state (longbridge ResizeState)
+    pub table_resize: ResizeState,
 
     // Transient UI state
     pub row_menu_open: Option<usize>,
+    pub column_settings_open: Option<usize>,
     pub menubar_open: Option<usize>,
 
     // Theme + notifications
@@ -182,20 +182,20 @@ pub struct TableApp {
 
 impl TableApp {
     fn new() -> Self {
+        let sheet = Sheet::new_empty();
+        let widths = sheet.columns.iter().map(|c| c.width).collect();
         let mut app = TableApp {
-            sheet: Sheet::new_empty(),
+            sheet,
             editing: None,
             selected_cell: None,
             edit_value: String::new(),
             groups: None,
-            new_col_name: String::new(),
-            new_col_type: ColumnType::Text,
             clipboard_row: None,
             clipboard_cell: None,
             formula: FormulaEditorState::default(),
-            table_resize_col: None,
-            table_resize_last_x: None,
+            table_resize: ResizeState::new(widths).min_width(60.0).max_width(800.0),
             row_menu_open: None,
+            column_settings_open: None,
             menubar_open: None,
             theme: AppTheme::dark(),
             notifications: NotificationManager::new(),
@@ -205,6 +205,20 @@ impl TableApp {
         evaluate_all_formulas(&mut app.sheet);
         app.recompute_groups();
         app
+    }
+
+    fn rebuild_resize_state(&mut self) {
+        let widths = self.sheet.columns.iter().map(|c| c.width).collect();
+        self.table_resize = ResizeState::new(widths).min_width(60.0).max_width(800.0);
+    }
+
+    fn sync_widths_from_resize(&mut self) {
+        let ws = self.table_resize.widths();
+        for (i, w) in ws.iter().enumerate() {
+            if let Some(col) = self.sheet.columns.get_mut(i) {
+                col.width = *w;
+            }
+        }
     }
 
     fn title(&self) -> String {
@@ -286,27 +300,35 @@ impl TableApp {
                 };
                 self.menubar_open = None;
             }
-            Message::TableResizeStart(i) => {
-                self.table_resize_col = Some(i);
-                self.table_resize_last_x = None;
-            }
-            Message::TableResizeMove(pt) => {
-                if let Some(i) = self.table_resize_col {
-                    if let Some(last) = self.table_resize_last_x {
-                        let delta = pt.x - last;
-                        if let Some(col) = self.sheet.columns.get_mut(i) {
-                            col.width = (col.width + delta).clamp(60.0, 800.0);
+            Message::ColumnSettingsToggle(col) => {
+                self.column_settings_open = match (self.column_settings_open, col) {
+                    (Some(cur), Some(c)) if cur == c => None,
+                    _ => col,
+                };
+                match self.column_settings_open {
+                    Some(c) if matches!(
+                        self.sheet.columns.get(c).map(|d| &d.col_type),
+                        Some(ColumnType::Formula)
+                    ) =>
+                    {
+                        if self.formula.editing_col != Some(c) {
+                            self.formula.open(c, &self.sheet);
                         }
                     }
-                    self.table_resize_last_x = Some(pt.x);
+                    _ => {
+                        if self.formula.editing_col.is_some() {
+                            self.formula.close();
+                        }
+                    }
                 }
             }
-            Message::TableResizeEnd => {
-                if self.table_resize_col.is_some() {
+            Message::TableResize(event) => {
+                let was_release = matches!(event, ResizeEvent::Release);
+                self.table_resize.apply(event);
+                self.sync_widths_from_resize();
+                if was_release {
                     self.dirty = true;
                 }
-                self.table_resize_col = None;
-                self.table_resize_last_x = None;
             }
             Message::CopyRow(row) => {
                 if row < self.sheet.rows.len() {
@@ -444,6 +466,7 @@ impl TableApp {
                 }
                 self.editing = None;
                 self.recompute_groups();
+                self.rebuild_resize_state();
                 self.dirty = true;
             }
             Message::InsertColumnRight(col) => {
@@ -468,6 +491,7 @@ impl TableApp {
                 }
                 self.editing = None;
                 self.recompute_groups();
+                self.rebuild_resize_state();
                 self.dirty = true;
             }
             Message::DeleteColumn(col) => {
@@ -501,6 +525,7 @@ impl TableApp {
                 self.editing = None;
                 sort_rows(&mut self.sheet);
                 self.recompute_groups();
+                self.rebuild_resize_state();
                 self.dirty = true;
             }
             Message::FileOpen => {
@@ -543,6 +568,7 @@ impl TableApp {
                     self.dirty = false;
                     self.recompute_groups();
                     sort_rows(&mut self.sheet);
+                    self.rebuild_resize_state();
                     if let Some(path) = self.sheet.file_path.clone() {
                         self.remember_recent(&path);
                     }
@@ -712,6 +738,7 @@ impl TableApp {
             }
             Message::ColumnTypeChanged(col, new_type) => {
                 if col < self.sheet.columns.len() {
+                    let became_formula = matches!(new_type, ColumnType::Formula);
                     self.sheet.columns[col].col_type = new_type.clone();
                     for row in &mut self.sheet.rows {
                         if let Some(cell) = row.get(col) {
@@ -722,6 +749,37 @@ impl TableApp {
                     evaluate_all_formulas(&mut self.sheet);
                     self.recompute_groups();
                     self.dirty = true;
+                    if became_formula && self.formula.editing_col != Some(col) {
+                        self.formula.open(col, &self.sheet);
+                    } else if !became_formula && self.formula.editing_col == Some(col) {
+                        self.formula.close();
+                    }
+                }
+            }
+            Message::ColumnNameChanged(col, name) => {
+                if let Some(c) = self.sheet.columns.get_mut(col) {
+                    c.name = name;
+                    self.dirty = true;
+                }
+            }
+            Message::ColumnPrecisionChanged(col, p) => {
+                if let Some(c) = self.sheet.columns.get_mut(col) {
+                    c.format.precision = p.min(6);
+                    self.dirty = true;
+                }
+            }
+            Message::ColumnThousandsToggled(col) => {
+                if let Some(c) = self.sheet.columns.get_mut(col) {
+                    c.format.thousands = !c.format.thousands;
+                    self.dirty = true;
+                }
+            }
+            Message::ColumnCurrencySymbolChanged(col, sym) => {
+                if let Some(c) = self.sheet.columns.get_mut(col) {
+                    if matches!(c.col_type, ColumnType::Currency(_)) {
+                        c.col_type = ColumnType::Currency(sym);
+                        self.dirty = true;
+                    }
                 }
             }
             Message::AddRow => {
@@ -729,26 +787,16 @@ impl TableApp {
                 self.recompute_groups();
                 self.dirty = true;
             }
-            Message::NewColNameChanged(name) => {
-                self.new_col_name = name;
-            }
-            Message::NewColTypeChanged(t) => {
-                self.new_col_type = t;
-            }
             Message::AddColumn(col_type) => {
-                let name = if self.new_col_name.trim().is_empty() {
-                    format!("Column {}", self.sheet.col_count() + 1)
-                } else {
-                    self.new_col_name.trim().to_string()
-                };
+                let name = format!("Column {}", self.sheet.col_count() + 1);
                 let is_formula = col_type == ColumnType::Formula;
                 self.sheet.add_column(name, col_type);
-                self.new_col_name.clear();
                 if is_formula {
                     let new_col = self.sheet.columns.len() - 1;
                     self.formula.open(new_col, &self.sheet);
                 }
                 self.recompute_groups();
+                self.rebuild_resize_state();
                 self.dirty = true;
             }
             Message::FormulaOpenEditor(col) => {
@@ -766,9 +814,11 @@ impl TableApp {
                     self.dirty = true;
                 }
                 self.recompute_groups();
+                self.column_settings_open = None;
             }
             Message::FormulaEditCancel => {
                 self.formula.close();
+                self.column_settings_open = None;
             }
             Message::FormulaSuggestionMove(delta) => {
                 self.formula.handle_suggestion_move(delta, &self.sheet);

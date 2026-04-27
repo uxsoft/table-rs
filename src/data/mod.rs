@@ -25,6 +25,55 @@ impl std::fmt::Display for ColumnType {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NumberFormat {
+    #[serde(default = "default_precision")]
+    pub precision: u8,
+    #[serde(default)]
+    pub thousands: bool,
+}
+
+fn default_precision() -> u8 {
+    2
+}
+
+impl Default for NumberFormat {
+    fn default() -> Self {
+        Self {
+            precision: 2,
+            thousands: false,
+        }
+    }
+}
+
+impl NumberFormat {
+    pub fn format_f64(&self, n: f64) -> String {
+        let p = self.precision.min(6) as usize;
+        let abs = n.abs();
+        let sign = if n < 0.0 { "-" } else { "" };
+        let formatted = format!("{:.*}", p, abs);
+        if !self.thousands {
+            return format!("{sign}{formatted}");
+        }
+        let (int_part, frac_part) = match formatted.split_once('.') {
+            Some((i, f)) => (i, Some(f)),
+            None => (formatted.as_str(), None),
+        };
+        let mut grouped = String::with_capacity(int_part.len() + int_part.len() / 3);
+        for (i, ch) in int_part.chars().rev().enumerate() {
+            if i > 0 && i % 3 == 0 {
+                grouped.push(',');
+            }
+            grouped.push(ch);
+        }
+        let int_grouped: String = grouped.chars().rev().collect();
+        match frac_part {
+            Some(f) => format!("{sign}{int_grouped}.{f}"),
+            None => format!("{sign}{int_grouped}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnDef {
     pub name: String,
@@ -32,6 +81,8 @@ pub struct ColumnDef {
     pub width: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formula: Option<String>,
+    #[serde(default)]
+    pub format: NumberFormat,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -47,24 +98,12 @@ pub enum CellValue {
 }
 
 impl CellValue {
-    pub fn display_value(&self, currency_symbol: &str) -> String {
+    pub fn display_value(&self, currency_symbol: &str, format: &NumberFormat) -> String {
         match self {
             CellValue::Text(s) => s.clone(),
-            CellValue::Number(n) => {
-                if *n == n.floor() {
-                    format!("{}", *n as i64)
-                } else {
-                    format!("{:.2}", n)
-                }
-            }
-            CellValue::Currency(n) => format!("{}{:.2}", currency_symbol, n),
-            CellValue::Formula { cached: Some(v), .. } => {
-                if *v == v.floor() {
-                    format!("{}", *v as i64)
-                } else {
-                    format!("{:.2}", v)
-                }
-            }
+            CellValue::Number(n) => format.format_f64(*n),
+            CellValue::Currency(n) => format!("{}{}", currency_symbol, format.format_f64(*n)),
+            CellValue::Formula { cached: Some(v), .. } => format.format_f64(*v),
             CellValue::Formula { cached: None, .. } => "#EVAL".to_string(),
             CellValue::Empty => String::new(),
         }
@@ -147,18 +186,21 @@ impl Sheet {
                     col_type: ColumnType::Text,
                     width: 150.0,
                     formula: None,
+                    format: NumberFormat::default(),
                 },
                 ColumnDef {
                     name: "Value".into(),
                     col_type: ColumnType::Number,
                     width: 100.0,
                     formula: None,
+                    format: NumberFormat::default(),
                 },
                 ColumnDef {
                     name: "Price".into(),
                     col_type: ColumnType::Currency("$".into()),
                     width: 120.0,
                     formula: None,
+                    format: NumberFormat::default(),
                 },
             ],
             rows: vec![
@@ -205,6 +247,7 @@ impl Sheet {
             col_type,
             width,
             formula: None,
+            format: NumberFormat::default(),
         });
         for row in &mut self.rows {
             row.push(CellValue::Empty);
@@ -263,6 +306,7 @@ impl Sheet {
                 col_type,
                 width,
                 formula: None,
+                format: NumberFormat::default(),
             },
         );
         for row in &mut self.rows {

@@ -2,17 +2,19 @@ use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{button, column, container, row as iced_row, text, text_input, Space};
 use iced::{Background, Border, Element, Length, Padding, Shadow};
 
-use iced_longbridge::components::button::Variant;
+use iced_longbridge::components::button::{button_ex, Variant};
 use iced_longbridge::components::collapsible::collapsible;
 use iced_longbridge::components::context_menu::ContextMenu;
+use iced_longbridge::components::hover_card::hover_card;
+use iced_longbridge::components::input::input_sized;
 use iced_longbridge::components::menu::{menu, Item as MenuItem};
 use iced_longbridge::components::popover::popover_dismissable;
-use iced_longbridge::components::table::{
-    table_with, Column, ResizeHandlers, SortDir, TableOptions,
-};
+use iced_longbridge::components::select::select_sized;
+use iced_longbridge::components::switch::switch;
+use iced_longbridge::components::table::{table, Column, SortDir};
 use iced_longbridge::theme::{AppTheme, Size};
 
-use crate::data::{CellValue, ColumnType, SortDirection};
+use crate::data::{CellValue, ColumnType, NumberFormat, SortDirection};
 use crate::ui::icons::{icon, icon_button, icon_colored, IconKind};
 use crate::{sort_key_for, Message, TableApp, MAX_SORT_COLS};
 
@@ -50,7 +52,6 @@ pub fn view(app: &TableApp) -> Element<'_, Message> {
             .spacing(6)
             .width(Length::Fill),
     )
-    .padding(Padding::from([8.0, 12.0]))
     .width(Length::Fill)
     .height(Length::Fill)
     .into()
@@ -65,16 +66,17 @@ fn flat_view(app: &TableApp) -> Element<'_, Message> {
         .map(|(i, r)| (i, r.as_slice()))
         .collect();
     let columns = build_columns(app);
-    let options = build_table_options(app, true);
-    let tbl = table_with(&app.theme, &rows, columns, options);
-    // `table_with` returns an Element we can return directly; put it in a
-    // container so the outer column doesn't stretch unboundedly.
+    let tbl: Element<'_, Message> = build_table(app, &rows, columns, true);
+    // Container so the outer column doesn't stretch unboundedly.
     container(tbl).width(Length::Fill).into()
 }
 
 fn grouped_view(app: &TableApp) -> Element<'_, Message> {
     let theme = &app.theme;
-    let groups = app.groups.as_ref().expect("grouped_view called without groups");
+    let groups = app
+        .groups
+        .as_ref()
+        .expect("grouped_view called without groups");
     let mut col = column![].spacing(6).width(Length::Fill);
     for (gi, g) in groups.iter().enumerate() {
         let group_rows: Vec<RowRef<'_>> = g
@@ -88,13 +90,12 @@ fn grouped_view(app: &TableApp) -> Element<'_, Message> {
         // header. Sort/group via sidebar remains available on all groups.
         let is_primary = gi == 0;
         let columns = build_columns(app);
-        let options = build_table_options(app, is_primary);
         let label = format!("{}  ({})", g.key, g.row_indices.len());
 
         let inner: Element<'_, Message> = if g.collapsed {
             Space::new().height(Length::Fixed(0.0)).into()
         } else {
-            table_with(theme, &group_rows, columns, options)
+            build_table(app, &group_rows, columns, is_primary)
         };
 
         col = col.push(collapsible(
@@ -108,10 +109,12 @@ fn grouped_view(app: &TableApp) -> Element<'_, Message> {
     col.into()
 }
 
-fn build_table_options<'a>(
+fn build_table<'a>(
     app: &'a TableApp,
+    rows: &[RowRef<'a>],
+    columns: Vec<Column<'a, RowRef<'a>, Message>>,
     wire_interactions: bool,
-) -> TableOptions<'a, Message> {
+) -> Element<'a, Message> {
     let sort = app.sheet.sort.as_ref().and_then(|s| {
         sort_key_for(s.column).map(|k| {
             let dir = match s.direction {
@@ -122,26 +125,16 @@ fn build_table_options<'a>(
         })
     });
 
-    TableOptions {
-        sort,
-        on_sort: if wire_interactions {
-            Some(Box::new(Message::TableSort))
-        } else {
-            None
-        },
-        striped: true,
-        row_height: 34.0,
-        resize: if wire_interactions {
-            Some(ResizeHandlers {
-                on_grab: Box::new(Message::TableResizeStart),
-                on_drag: Box::new(Message::TableResizeMove),
-                on_release: Message::TableResizeEnd,
-                dragging: app.table_resize_col,
-            })
-        } else {
-            None
-        },
+    let mut tbl = table(&app.theme, rows, columns)
+        .striped(true)
+        .row_height(34.0);
+
+    if wire_interactions {
+        tbl = tbl.sort(sort, Message::TableSort);
+        tbl = tbl.resize(&app.table_resize, Message::TableResize);
     }
+
+    tbl.into()
 }
 
 fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> {
@@ -152,7 +145,7 @@ fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> 
     let only_one_column = app.sheet.col_count() <= 1;
 
     for (ci, def) in app.sheet.columns.iter().enumerate() {
-        let col_width = Length::Fixed(def.width);
+        let col_width = app.table_resize.width(ci);
         let col_type = def.col_type.clone();
         let has_formula = def.formula.is_some();
         let header = def.name.clone();
@@ -164,6 +157,7 @@ fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> 
             ColumnType::Currency(sym) => sym.clone(),
             _ => "$".to_string(),
         };
+        let format = def.format.clone();
         let t = theme;
         let editing = app.editing;
         let selected = app.selected_cell;
@@ -180,6 +174,7 @@ fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> 
                 &col_type,
                 has_formula,
                 &currency_symbol,
+                &format,
                 editing,
                 selected,
                 edit_value,
@@ -204,8 +199,26 @@ fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> 
             }
         }
 
+        c = c.header_button(
+            IconKind::Settings,
+            Message::ColumnSettingsToggle(Some(ci)),
+        );
+        if app.column_settings_open == Some(ci) {
+            c = c.header_panel(build_column_settings_panel(app, ci));
+        }
+
         cols.push(c);
     }
+
+    // Trailing "+" column — header button creates a new Text column. Body
+    // cells are empty (they only exist because every column needs a renderer).
+    let add_col = Column::new("", move |_rr: &RowRef<'a>| -> Element<'a, Message> {
+        Space::new().width(Length::Fill).into()
+    })
+    .width(Length::Fixed(36.0))
+    .align(Horizontal::Center)
+    .header_button(IconKind::Plus, Message::AddColumn(ColumnType::Text));
+    cols.push(add_col);
 
     // Trailing kebab (row menu) column.
     let row_menu_open = app.row_menu_open;
@@ -222,6 +235,271 @@ fn build_columns<'a>(app: &'a TableApp) -> Vec<Column<'a, RowRef<'a>, Message>> 
     cols
 }
 
+const FORMULA_SYNTAX_HELP: &str = "Formula syntax\n\n\
+    {ColumnName}   value of that column in this row\n\
+    + - * /        arithmetic\n\
+    ( )            grouping\n\
+\n\
+Examples\n\
+    {Price} * {Quantity}\n\
+    ({Value} + 10) / 2";
+
+fn type_options() -> Vec<String> {
+    vec![
+        "Text".to_string(),
+        "Number".to_string(),
+        "Currency".to_string(),
+        "Formula".to_string(),
+    ]
+}
+
+fn type_label(t: &ColumnType) -> String {
+    match t {
+        ColumnType::Text => "Text",
+        ColumnType::Number => "Number",
+        ColumnType::Currency(_) => "Currency",
+        ColumnType::Formula => "Formula",
+    }
+    .to_string()
+}
+
+fn precision_options() -> Vec<String> {
+    (0..=6u8).map(|n| n.to_string()).collect()
+}
+
+fn build_column_settings_panel<'a>(
+    app: &'a TableApp,
+    ci: usize,
+) -> Element<'a, Message> {
+    let theme = &app.theme;
+    let t = *theme;
+    let def = match app.sheet.columns.get(ci) {
+        Some(d) => d,
+        None => return Space::new().width(Length::Shrink).height(Length::Shrink).into(),
+    };
+
+    let panel_width = Length::Fixed(280.0);
+
+    let section_label = |label: &str| -> Element<'a, Message> {
+        text(label.to_string())
+            .size(11.0)
+            .color(t.muted_foreground)
+            .into()
+    };
+
+    // Name input.
+    let name_input = input_sized(theme, Size::Sm, "Column name", &def.name)
+        .on_input(move |s| Message::ColumnNameChanged(ci, s))
+        .width(Length::Fill);
+
+    // Type select.
+    let current_type_label = type_label(&def.col_type);
+    let current_currency_sym = match &def.col_type {
+        ColumnType::Currency(sym) => sym.clone(),
+        _ => "$".to_string(),
+    };
+    let type_select = select_sized(
+        theme,
+        Size::Sm,
+        type_options(),
+        Some(current_type_label),
+        move |label| {
+            let new_type = match label.as_str() {
+                "Number" => ColumnType::Number,
+                "Currency" => ColumnType::Currency(current_currency_sym.clone()),
+                "Formula" => ColumnType::Formula,
+                _ => ColumnType::Text,
+            };
+            Message::ColumnTypeChanged(ci, new_type)
+        },
+    )
+    .width(Length::Fill);
+
+    let mut col = column![
+        section_label("Name"),
+        name_input,
+        Space::new().height(Length::Fixed(4.0)),
+        section_label("Type"),
+        type_select,
+    ]
+    .spacing(4)
+    .width(panel_width);
+
+    // Number / Currency formatting.
+    let is_numeric = matches!(def.col_type, ColumnType::Number | ColumnType::Currency(_));
+    if is_numeric {
+        col = col.push(Space::new().height(Length::Fixed(4.0)));
+
+        let precision_value = def.format.precision.min(6);
+        let precision_select = select_sized(
+            theme,
+            Size::Sm,
+            precision_options(),
+            Some(precision_value.to_string()),
+            move |label| {
+                let n = label.parse::<u8>().unwrap_or(2);
+                Message::ColumnPrecisionChanged(ci, n)
+            },
+        )
+        .width(Length::Fill);
+
+        col = col.push(section_label("Decimals"));
+        col = col.push(precision_select);
+
+        let thousands_switch =
+            switch(theme, def.format.thousands, Some("Thousands separator".into()))
+                .on_toggle(move |_| Message::ColumnThousandsToggled(ci))
+                .text_size(13.0);
+
+        col = col.push(Space::new().height(Length::Fixed(4.0)));
+        col = col.push(thousands_switch);
+    }
+
+    // Currency symbol input.
+    if let ColumnType::Currency(sym) = &def.col_type {
+        col = col.push(Space::new().height(Length::Fixed(4.0)));
+        col = col.push(section_label("Currency symbol"));
+        let sym_input = input_sized(theme, Size::Sm, "$", sym)
+            .on_input(move |s| Message::ColumnCurrencySymbolChanged(ci, s));
+        col = col.push(sym_input);
+    }
+
+    // Formula editor.
+    if matches!(def.col_type, ColumnType::Formula) {
+        col = col.push(Space::new().height(Length::Fixed(4.0)));
+
+        let header_row = iced_row![
+            section_label("Formula"),
+            Space::new().width(Length::Fill),
+            hover_card(
+                theme,
+                icon_colored(IconKind::FunctionSquare, 14.0, t.muted_foreground),
+                text(FORMULA_SYNTAX_HELP)
+                    .size(12.0)
+                    .color(t.popover_foreground)
+                    .into(),
+            ),
+        ]
+        .align_y(Vertical::Center);
+        col = col.push(header_row);
+
+        let formula_value = if app.formula.editing_col == Some(ci) {
+            app.formula.value.as_str()
+        } else {
+            def.formula.as_deref().unwrap_or("")
+        };
+        let input: Element<'a, Message> = input_sized(theme, Size::Sm, "= expression…", formula_value)
+            .on_input(Message::FormulaChanged)
+            .on_submit(Message::FormulaEditCommit)
+            .width(Length::Fill)
+            .into();
+
+        let suggestions = app.formula.suggestions(&app.sheet);
+        let suggestion_panel: Option<Element<'a, Message>> = if suggestions.is_empty()
+            || app.formula.editing_col != Some(ci)
+        {
+            None
+        } else {
+            let selected = app.formula.suggestions_selected.min(suggestions.len() - 1);
+            let rows: Vec<Element<'a, Message>> = suggestions
+                .iter()
+                .enumerate()
+                .map(|(i, (_col_idx, name))| {
+                    let variant = if i == selected {
+                        Variant::Secondary
+                    } else {
+                        Variant::Ghost
+                    };
+                    button_ex(
+                        theme,
+                        name.clone(),
+                        variant,
+                        Size::Sm,
+                        Some(Message::FormulaSuggestionClick(i)),
+                        false,
+                        false,
+                    )
+                })
+                .collect();
+            Some(
+                column(rows)
+                    .spacing(2)
+                    .width(Length::Fixed(220.0))
+                    .into(),
+            )
+        };
+
+        let input_with_popover =
+            popover_dismissable(theme, input, suggestion_panel, Message::FormulaEscape);
+        col = col.push(input_with_popover);
+
+        if let Some(err) = &app.formula.error {
+            let dot: Element<'a, Message> = container(text(""))
+                .width(Length::Fixed(8.0))
+                .height(Length::Fixed(8.0))
+                .style(move |_| container::Style {
+                    background: Some(Background::Color(t.danger)),
+                    text_color: Some(t.danger_foreground),
+                    border: Border {
+                        color: t.danger,
+                        width: 0.0,
+                        radius: 4.0.into(),
+                    },
+                    shadow: Shadow::default(),
+                    snap: true,
+                })
+                .into();
+            let err_row = iced_row![
+                dot,
+                text(format!("Didn't evaluate: {err}"))
+                    .size(11.0)
+                    .color(t.danger),
+            ]
+            .spacing(6)
+            .align_y(Vertical::Center);
+            col = col.push(err_row);
+        }
+
+        let commit = icon_button(
+            theme,
+            iced_row![
+                icon_colored(IconKind::Check, 12.0, theme.primary_foreground),
+                text("Apply").size(12.0).color(theme.primary_foreground),
+            ]
+            .spacing(4)
+            .align_y(Vertical::Center),
+            Variant::Primary,
+            Size::Sm,
+            Some(Message::FormulaEditCommit),
+            false,
+        );
+        let cancel = icon_button(
+            theme,
+            iced_row![
+                icon(theme, IconKind::Close, 12.0),
+                text("Cancel").size(12.0).color(theme.foreground),
+            ]
+            .spacing(4)
+            .align_y(Vertical::Center),
+            Variant::Ghost,
+            Size::Sm,
+            Some(Message::FormulaEditCancel),
+            false,
+        );
+
+        let actions = iced_row![Space::new().width(Length::Fill), cancel, commit]
+            .spacing(6)
+            .align_y(Vertical::Center);
+        col = col.push(actions);
+
+    }
+
+    container(col)
+        .padding(Padding::from(12.0))
+        .width(panel_width)
+        .into()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_cell<'a>(
     theme: &AppTheme,
@@ -231,6 +509,7 @@ fn render_cell<'a>(
     col_type: &ColumnType,
     has_formula: bool,
     currency_symbol: &str,
+    format: &NumberFormat,
     editing: Option<(usize, usize)>,
     selected: Option<(usize, usize)>,
     edit_value: &'a str,
@@ -249,24 +528,20 @@ fn render_cell<'a>(
             .on_input(Message::CellEdited)
             .on_submit(Message::CellEditSubmit)
             .size(13.0)
-            .padding(Padding::from([2.0, 6.0]))
+            .padding(Padding::from([2.0, 6.0])) // TODO Remove padding
             .style(move |_, status| cell_input_style(&t, status))
             .into();
     }
 
     let child: Element<'a, Message> = if is_formula {
         // Formula cells are read-only.
-        let display = cell.display_value(currency_symbol);
-        container(
-            text(display)
-                .size(13.0)
-                .color(t.muted_foreground),
-        )
-        .padding(Padding::from([0.0, 4.0]))
-        .width(Length::Fill)
-        .into()
+        let display = cell.display_value(currency_symbol, format);
+        container(text(display).size(13.0).color(t.muted_foreground))
+            .padding(Padding::from([0.0, 4.0]))
+            .width(Length::Fill)
+            .into()
     } else {
-        let display = cell.display_value(currency_symbol);
+        let display = cell.display_value(currency_symbol, format);
         let body: Element<'a, Message> = if display.is_empty() {
             container(icon_colored(IconKind::Dot, 12.0, t.muted_foreground))
                 .height(Length::Fixed(18.0))
@@ -329,8 +604,7 @@ fn cell_context_items(
 
     items.push(MenuItem::Separator);
 
-    let mut clear = MenuItem::new("Clear contents", Message::ClearCell(row, col))
-        .shortcut("Del");
+    let mut clear = MenuItem::new("Clear contents", Message::ClearCell(row, col)).shortcut("Del");
     if is_formula {
         clear = clear.disabled();
     }
@@ -435,7 +709,10 @@ fn render_row_menu<'a>(
     popover_dismissable(theme, trigger, panel, Message::RowMenuToggle(None))
 }
 
-fn cell_input_style(t: &AppTheme, status: iced::widget::text_input::Status) -> iced::widget::text_input::Style {
+fn cell_input_style(
+    t: &AppTheme,
+    status: iced::widget::text_input::Status,
+) -> iced::widget::text_input::Style {
     use iced::widget::text_input::Status::*;
     let (border_color, border_width) = match status {
         Focused { .. } => (t.ring, 2.0),

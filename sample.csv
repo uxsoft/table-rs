@@ -1,11 +1,4 @@
-Name,Category,Quantity,Price,Total
-Laptop,Electronics,5,999.99,=C2*D2
-Mouse,Electronics,50,29.99,=C3*D3
-Desk,Furniture,10,249.50,=C4*D4
-Chair,Furniture,15,189.00,=C5*D5
-Monitor,Electronics,8,449.99,=C6*D6
-Keyboard,Electronics,30,79.99,=C7*D7
-Lamp,Furniture,20,45.00,=C8*D8
-Headset,Electronics,25,149.99,=C9*D9
-Bookshelf,Furniture,6,199.99,=C10*D10
-Webcam,Electronics,40,89.99,=C11*D11
+Name,Value,Price,Total
+Item A,10,9.99,=
+Item B,25,19.5,=
+Item C,10,5.75,=

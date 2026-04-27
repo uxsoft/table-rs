@@ -37,6 +37,7 @@ pub fn load(path: &Path) -> Result<Sheet, Box<dyn std::error::Error>> {
                 col_type: ColumnType::Text,
                 width: 150.0,
                 formula: None,
+                format: crate::data::NumberFormat::default(),
             });
         }
         cols.truncate(headers.len());
@@ -49,6 +50,7 @@ pub fn load(path: &Path) -> Result<Sheet, Box<dyn std::error::Error>> {
                 col_type: ColumnType::Text,
                 width: 150.0,
                 formula: None,
+                format: crate::data::NumberFormat::default(),
             })
             .collect()
     };

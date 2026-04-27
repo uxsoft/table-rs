@@ -37,6 +37,7 @@ pub enum IconKind {
     Plus,
     FunctionSquare,
     Dot,
+    Settings,
 }
 
 impl IconKind {
@@ -60,6 +61,7 @@ impl IconKind {
             IconKind::Plus => include_bytes!("../../assets/icons/plus.svg"),
             IconKind::FunctionSquare => include_bytes!("../../assets/icons/square-function.svg"),
             IconKind::Dot => include_bytes!("../../assets/icons/dot.svg"),
+            IconKind::Settings => include_bytes!("../../assets/icons/settings.svg"),
         }
     }
 
@@ -83,6 +85,7 @@ impl IconKind {
                 IconKind::Plus,
                 IconKind::FunctionSquare,
                 IconKind::Dot,
+                IconKind::Settings,
             ];
             ALL.iter()
                 .map(|&k| (k, svg::Handle::from_memory(k.bytes())))

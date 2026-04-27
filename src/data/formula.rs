@@ -299,6 +299,7 @@ mod tests {
                     col_type,
                     width: 100.0,
                     formula: None,
+                    format: crate::data::NumberFormat::default(),
                 })
                 .collect(),
             rows,
